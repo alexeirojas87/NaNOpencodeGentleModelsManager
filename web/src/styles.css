@@ -643,6 +643,60 @@ code {
   padding: 8px 12px;
 }
 
+/* --- status view (WU10) ---------------------------------------------------
+   Read-only panels; deliberately NO new motion here (the design confines
+   transitions to the save bar, and the global prefers-reduced-motion block
+   already neutralizes any that a future unit adds). All interactive
+   elements are native button/input and take the global :focus-visible ring. */
+
+.status-section {
+  margin-top: 24px;
+}
+
+.status-section h3 {
+  align-items: baseline;
+  display: flex;
+  font-size: 15px;
+  font-weight: 600;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+
+.status-grid {
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin: 0;
+}
+
+.status-grid dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-grid dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.backup-list {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+
+.backup-list li {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  overflow-wrap: anywhere;
+  padding: 3px 0;
+}
+
+.restore-cmd code {
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
