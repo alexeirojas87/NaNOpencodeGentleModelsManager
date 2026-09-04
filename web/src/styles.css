@@ -1,0 +1,386 @@
+/* WU6.1 — utility-console theme (design §UI "moderno pero sencillo").
+   A working config tool, not a landing page: dark neutral surfaces, one
+   amber accent reserved for drift/unsaved/warning states, and a single
+   superfamily (IBM Plex Sans for prose, Plex Mono for ids/paths/values).
+   Motion is limited to the save bar; focus-visible and reduced-motion are
+   honored. */
+
+:root {
+  --bg: #14161a;
+  --surface: #1b1e24;
+  --line: #2a2f38;
+  --text: #d8dce3;
+  --muted: #8b94a3;
+  --accent: #e5b95c;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- shell + left rail --------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 20px 12px;
+  border-right: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.rail-brand {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  padding: 0 10px 18px;
+}
+
+.rail-brand span {
+  color: var(--accent);
+}
+
+.rail-item {
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.rail-item:hover {
+  background: var(--surface);
+}
+
+.rail-item[aria-current='page'] {
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 600;
+}
+
+.rail-foot {
+  margin-top: auto;
+  font-size: 11.5px;
+  padding: 0 10px;
+}
+
+.content {
+  padding: 28px 32px 96px;
+  min-width: 0;
+}
+
+/* --- views + provider cards ------------------------------------------------ */
+
+.view-header h2 {
+  margin: 0 0 2px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.view-header p {
+  margin: 0 0 20px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px 18px;
+}
+
+.card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.card-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chip {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.card label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 10px 0 3px;
+}
+
+.card input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 9px;
+}
+
+.card input.mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.apikey-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.apikey-head label {
+  margin-bottom: 0;
+}
+
+.badge {
+  font-size: 11.5px;
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+
+.badge-set {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.badge-none {
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 20px;
+}
+
+.error-panel [role='alert'],
+.error-panel {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+/* --- restart banner (CX-3) -------------------------------------------------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-weight: 500;
+  margin: 0 0 18px;
+  padding: 9px 14px;
+}
+
+.banner-dismiss {
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+/* --- sticky save bar ---------------------------------------------------------- */
+
+.savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid var(--line);
+  margin: 24px -32px -96px;
+  padding: 12px 32px;
+  transition: box-shadow 0.15s ease;
+}
+
+.savebar-count {
+  font-variant-numeric: tabular-nums;
+  min-width: 86px;
+}
+
+.savebar-error {
+  color: var(--accent);
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.savebar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 16px;
+}
+
+.btn:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14161a;
+  font-weight: 600;
+}
+
+/* --- conflict modal (SCW-2) ---------------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 55%);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 20;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-width: 720px;
+  width: 100%;
+  padding: 20px 24px 22px;
+}
+
+.modal h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+
+.modal-note {
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.modal-hashes {
+  font-size: 12.5px;
+  margin: 0 0 14px;
+}
+
+.diff {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.diff th,
+.diff td {
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  padding: 6px 10px 6px 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.diff th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.diff td:first-child {
+  width: 38%;
+}
+
+.diff-pending {
+  color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
