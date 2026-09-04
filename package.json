@@ -6,11 +6,11 @@
   "description": "Local dashboard for OpenCode provider/model config and gentle-ai orchestration assignments",
   "packageManager": "pnpm@11.21.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22.2"
   },
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"tsx watch server/src/index.ts\" \"vite\"",
-    "build": "vite build",
+    "dev": "concurrently -n server,web -c blue,green \"tsx watch server/src/index.ts\" \"vite --config vite.config.ts web\"",
+    "build": "vite build --config vite.config.ts web",
     "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

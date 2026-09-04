@@ -11,7 +11,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // dev/build run with `--root web` (package.json scripts), so outDir is
+    // root-relative: '../dist' keeps production output at the repo root.
+    outDir: '../dist',
     emptyOutDir: true,
   },
   test: {
