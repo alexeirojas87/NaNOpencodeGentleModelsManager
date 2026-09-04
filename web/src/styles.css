@@ -496,6 +496,82 @@ code {
   padding: 4px 0;
 }
 
+/* --- orchestration view (WU8) ------------------------------------------------ */
+
+.orch-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 22px 0 8px;
+}
+
+.orch-table {
+  border-collapse: collapse;
+  margin-bottom: 18px;
+  width: 100%;
+}
+
+.orch-table th,
+.orch-table td {
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  padding: 8px 12px 8px 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.orch-table thead th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.orch-table select {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  max-width: 100%;
+  padding: 5px 8px;
+}
+
+.cell-absent {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.ro-extras {
+  margin-top: 6px;
+}
+
+.ro-block summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ro-flag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.ro-block pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

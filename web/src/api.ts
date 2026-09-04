@@ -145,6 +145,24 @@ export function deleteModel(
   ) as Promise<WriteResponse>;
 }
 
+/**
+ * WU8 — PUT /api/agents/:name/model (design §API-Surface, OA-2). `model` is
+ * a "provider/model" string to set, or null to clear the key (runtime
+ * default). This is the ONLY orchestration mutation the dashboard ships:
+ * prompt bodies and gentle-ai:* markers never enter the body — the server
+ * composes a single value/remove op on `agent.<name>.model` (OA-4).
+ */
+export function putAgentModel(
+  name: string,
+  hash: string,
+  model: string | null,
+): Promise<WriteResponse> {
+  return request('PUT', `/api/agents/${encodeURIComponent(name)}/model`, {
+    hash,
+    model,
+  }) as Promise<WriteResponse>;
+}
+
 /** Identity + advisory drift for the Status view and Models chip source (WU7). */
 export function getStatus(): Promise<StatusResponse> {
   return request('GET', '/api/status') as Promise<StatusResponse>;
