@@ -9,14 +9,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-/**
- * In-memory CONFIG as a plain JSON object tree. Keys keep JSON.parse
- * insertion order; serialization back to disk is JSON.stringify(tree, null, 2)
- * and must never sort keys (SCW-6). Refined in WU3.2 (shared/types.ts).
- */
-export interface ConfigTree {
-  [key: string]: unknown;
-}
+// Canonical ConfigTree moved to shared/types.ts in WU3.2 (type-only change;
+// load behavior unchanged). Re-exported so existing imports keep working.
+import type { ConfigTree } from '../../../shared/types';
+
+export type { ConfigTree };
 
 /** Result of a successful load — inputs for stale detection (SCW-1/SCW-2). */
 export interface LoadedConfig {
