@@ -11,6 +11,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 
 import { agentsRoute } from './routes/agents';
+import { catalogRoute } from './routes/catalog';
 import { configRoute } from './routes/config';
 import { modelsRoute } from './routes/models';
 import { providersRoute } from './routes/providers';
@@ -22,6 +23,7 @@ export const app = new Hono();
 app.get('/api/health', (c) => c.json({ ok: true }));
 
 app.route('/api', configRoute);
+app.route('/api', catalogRoute);
 app.route('/api', providersRoute);
 app.route('/api', modelsRoute);
 app.route('/api', agentsRoute);

@@ -139,8 +139,8 @@ export interface WriteResponse {
 
 /**
  * GET /api/status response envelope (design §API-Surface).
- * `drift` and `snapshotAsOf` stay empty/null until the bundled NaN snapshot
- * ships in WU7; `backups` lists restore points newest-first (SCW-4).
+ * WU7 fills `drift`/`snapshotAsOf` from the bundled NaN snapshot; `backups`
+ * lists restore points newest-first (SCW-4).
  */
 export interface StatusResponse {
   /** Resolved CONFIG path (sandbox-aware via CONFIG_PATH). */
@@ -149,11 +149,70 @@ export interface StatusResponse {
   hash: string;
   /** CONFIG mtime in epoch milliseconds. */
   mtime: number;
-  /** Declared-vs-snapshot drift cells (WU7). */
-  drift: unknown[];
+  /** Declared-vs-snapshot drift cells (WU7) — advisory only, never blocks. */
+  drift: DriftCell[];
+  /** `asOf` of the bundled snapshot; null only if the bundle were absent. */
   snapshotAsOf: string | null;
   /** Backup file paths, newest first. */
   backups: string[];
   /** True once this server process has written CONFIG (CX-3 carrier). */
   restartRequired: boolean;
+}
+
+/**
+ * One declared-vs-snapshot drift cell (MC-5). `advisory` is structurally
+ * true: drift NEVER rewrites the declared value and NEVER blocks a save —
+ * the save pipeline does not consult drift at all.
+ */
+export interface DriftCell {
+  /** CONFIG provider id the declaration lives under (data, not a match key). */
+  provider: string;
+  /** Model id whose declared field differs from the snapshot. */
+  model: string;
+  /** Drifted field (currently only contextWindow — the docs quota). */
+  field: string;
+  /** Value declared in CONFIG — always wins on save (user override). */
+  declared: number;
+  /** Bundled snapshot value shown side-by-side (never applied). */
+  snapshot: number;
+  advisory: true;
+}
+
+/**
+ * Snapshot model entry — docs metadata + quota from the bundled NaN catalog
+ * (spec Definitions: Snapshot). Deliberately NO pricing: NaN publishes
+ * quotas/rate-limits instead. Fields the docs record are present; fields it
+ * does not are absent — never invented (MC-1 consistency).
+ */
+export interface SnapshotModelEntry {
+  name?: string;
+  kind?: string;
+  /** Context quota in tokens (numeric drift oracle for MC-5). */
+  contextWindow?: number;
+  /** Raw docs label ('1M', '262K native') — display/provenance only. */
+  contextDocs?: string;
+  modalities?: ModelModalities;
+  /** Per-member quota, where the docs publish one. */
+  quota?: Record<string, unknown>;
+  /** Free-form docs metadata (size/params, license, tier, capabilities). */
+  docs?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/**
+ * Provider match metadata for the snapshot (drift rules): a CONFIG provider
+ * gets snapshot data only when its npm package AND display name match this
+ * pair. The provider ID is never a key — ids are user-owned (PC-4).
+ */
+export interface CatalogProviderMatch {
+  npm: string;
+  name: string;
+}
+
+/** GET /api/catalog response — the bundled offline snapshot document (CX-4). */
+export interface CatalogResponse {
+  asOf: string;
+  provider: CatalogProviderMatch;
+  models: Record<string, SnapshotModelEntry>;
+  provenance?: Record<string, unknown>;
 }

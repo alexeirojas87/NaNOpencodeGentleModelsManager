@@ -1,10 +1,11 @@
 // WU6.1 — application shell: left rail navigation (Providers · Models ·
 // Orchestration · Status) over the utility-console token theme. The rail is
-// chrome only; each section owns its data. Providers ships with this work
-// unit; the remaining sections arrive with their own work units (WU7, WU8,
+// chrome only; each section owns its data. Providers ships with WU6, Models
+// with WU7; the remaining sections arrive with their own work units (WU8,
 // WU10) and render a plain "not yet available" panel until then.
 import { useState } from 'react';
 
+import ModelsView from './views/ModelsView';
 import ProvidersView from './views/ProvidersView';
 
 const SECTIONS = [
@@ -50,7 +51,7 @@ export default function App() {
       </nav>
       <main className="content">
         {section === 'providers' && <ProvidersView />}
-        {section === 'models' && <ComingSoon label="Models" />}
+        {section === 'models' && <ModelsView />}
         {section === 'orchestration' && <ComingSoon label="Orchestration" />}
         {section === 'status' && <ComingSoon label="Status" />}
       </main>

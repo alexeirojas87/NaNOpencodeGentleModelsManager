@@ -1,0 +1,107 @@
+{
+  "asOf": "2026-09-04",
+  "provenance": {
+    "source": "Nan.Builders catalog docs page (docs/models) — an HTML page with no machine-readable API; no live endpoint exists to fetch (exploration #280, open question 2).",
+    "method": "Offline transcription of the exploration record into the design/spec field vocabulary. Only values present in that record appear; fields the record does not carry for a model (e.g. per-model modalities not transcribed) are omitted, never invented. `name` is the display form of the docs model id; per-model display names were not part of the record.",
+    "contextNotation": "Docs labels map to binary token counts: 1M → 1048576, 262K → 262144, 256K → 262144 — consistent with the 262144-family values used in CONFIG.",
+    "quotaPolicy": "NaN publishes per-member quotas and rate limits instead of pricing; this snapshot therefore carries quota metadata and no pricing of any kind (spec Definitions: Snapshot).",
+    "excludedNonChat": [
+      "qwen3-embedding",
+      "rerank",
+      "kokoro-tts",
+      "whisper-stt",
+      "flux-2-klein"
+    ],
+    "excludedNote": "Non-chat docs entries (embeddings, rerank, TTS, STT, image) are listed for completeness but excluded from `models`: they have no ModelConfig representation in the add-model flow."
+  },
+  "provider": {
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "NaN"
+  },
+  "models": {
+    "deepseek-v4-flash": {
+      "name": "DeepSeek V4 Flash",
+      "kind": "chat",
+      "contextWindow": 1048576,
+      "contextDocs": "1M",
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      },
+      "docs": {
+        "size": "305B MoE"
+      }
+    },
+    "gemma4": {
+      "name": "Gemma 4",
+      "kind": "chat",
+      "contextWindow": 262144,
+      "contextDocs": "256K",
+      "docs": {
+        "size": "26B-A4B"
+      }
+    },
+    "glm5.3": {
+      "name": "GLM 5.3",
+      "kind": "chat",
+      "contextWindow": 1048576,
+      "contextDocs": "1M",
+      "modalities": {
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "quota": {
+        "tokens": 400000000,
+        "window": "4h rolling"
+      },
+      "docs": {
+        "size": "753B",
+        "tier": "premium"
+      }
+    },
+    "glm5.3-flash": {
+      "name": "GLM 5.3 Flash",
+      "kind": "chat",
+      "contextWindow": 1048576,
+      "contextDocs": "1M",
+      "docs": {
+        "size": "320B-18B",
+        "license": "MIT"
+      }
+    },
+    "mimo-v2.5": {
+      "name": "MiMo v2.5",
+      "kind": "chat",
+      "contextWindow": 1048576,
+      "contextDocs": "1M",
+      "modalities": {
+        "input": ["text", "image", "audio"],
+        "output": ["text"]
+      },
+      "docs": {
+        "size": "310B-15B",
+        "license": "MIT"
+      }
+    },
+    "qwen3.6": {
+      "name": "Qwen 3.6",
+      "kind": "chat",
+      "contextWindow": 262144,
+      "contextDocs": "256K",
+      "docs": {
+        "size": "35B-A3B",
+        "tier": "flagship"
+      }
+    },
+    "qwen3.8-flash": {
+      "name": "Qwen 3.8 Flash",
+      "kind": "chat",
+      "contextWindow": 262144,
+      "contextDocs": "262K native",
+      "docs": {
+        "size": "125B-6B",
+        "license": "qwen-community-1.0"
+      }
+    }
+  }
+}

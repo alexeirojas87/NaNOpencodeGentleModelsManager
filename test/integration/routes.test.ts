@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { app } from '../../server/src/app';
+import { nanSnapshot } from '../../server/src/catalog';
 import { BACKUP_DIR_NAME } from '../../server/src/config/backup';
 import type { ConfigTree } from '../../server/src/config/load';
 import type { ConfigResponse } from '../../shared/types';
@@ -159,8 +160,8 @@ describe('GET /api/config — masked ConfigResponse shape (PC-2, CX-2, OA-1)', (
     ]);
     expect(body.hash).toBe(hashOf(configPath));
     expect(body.mtime).toBe(Math.trunc(statSync(configPath).mtimeMs));
-    // The bundled NaN snapshot ships in WU7 — null until then.
-    expect(body.snapshotAsOf).toBeNull();
+    // WU7 shipped the bundle — the REAL asOf of the offline snapshot (CX-4).
+    expect(body.snapshotAsOf).toBe(nanSnapshot.asOf);
     expect(body.defaultAgent).toBe('gentle-orchestrator');
   });
 
@@ -219,7 +220,7 @@ describe('GET /api/config — masked ConfigResponse shape (PC-2, CX-2, OA-1)', (
 
 // --- GET /api/status -------------------------------------------------------
 describe('GET /api/status — minimal fields per design §API-Surface', () => {
-  it('reports config identity with empty drift/snapshot before WU7', async () => {
+  it('reports config identity with the REAL advisory drift cells from the bundled snapshot (WU7)', async () => {
     const configPath = sandboxConfig();
     const res = await get('/api/status');
     expect(res.status).toBe(200);
@@ -228,8 +229,53 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
       path: configPath,
       hash: hashOf(configPath),
       mtime: Math.trunc(statSync(configPath).mtimeMs),
-      drift: [], // drift cells need the bundled snapshot — WU7.
-      snapshotAsOf: null,
+      // Golden: the fixture's nan provider matches the snapshot metadata, so
+      // exactly its 5 differing contextWindow declarations surface, in
+      // insertion order. Aligned qwen3.6 produces no cell; headroom and
+      // nanSendvalu (non-matching metadata) produce nothing either.
+      drift: [
+        {
+          provider: 'nan',
+          model: 'glm5.3-flash',
+          field: 'contextWindow',
+          declared: 262144,
+          snapshot: 1048576,
+          advisory: true,
+        },
+        {
+          provider: 'nan',
+          model: 'qwen3.8-flash',
+          field: 'contextWindow',
+          declared: 1000000,
+          snapshot: 262144,
+          advisory: true,
+        },
+        {
+          provider: 'nan',
+          model: 'mimo-v2.5',
+          field: 'contextWindow',
+          declared: 262144,
+          snapshot: 1048576,
+          advisory: true,
+        },
+        {
+          provider: 'nan',
+          model: 'deepseek-v4-flash',
+          field: 'contextWindow',
+          declared: 163840,
+          snapshot: 1048576,
+          advisory: true,
+        },
+        {
+          provider: 'nan',
+          model: 'gemma4',
+          field: 'contextWindow',
+          declared: 131072,
+          snapshot: 262144,
+          advisory: true,
+        },
+      ],
+      snapshotAsOf: nanSnapshot.asOf,
       backups: [],
       // No CONFIG write has happened in this process yet (CX-3 carrier).
       restartRequired: false,
@@ -254,6 +300,77 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
         .map((n) => join(dir, BACKUP_DIR_NAME, n)),
     );
     expect(backups.length).toBe(1);
+  });
+});
+
+// --- GET /api/catalog (WU7) + drift advisory end-to-end ----------------------
+describe('bundled catalog + advisory drift (WU7)', () => {
+  it('GET /api/catalog serves the offline snapshot — quotas and metadata, no pricing (CX-4)', async () => {
+    sandboxConfig();
+    const res = await get('/api/catalog');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.asOf).toBe(nanSnapshot.asOf);
+    // Matched by npm+name metadata, not a provider id (PC-4).
+    expect(body.provider).toEqual({
+      npm: '@ai-sdk/openai-compatible',
+      name: 'NaN',
+    });
+    // The MC-3 pre-fill source and the MC-5 drift oracle.
+    expect(body.models['glm5.3-flash']).toMatchObject({
+      name: 'GLM 5.3 Flash',
+      contextWindow: 1048576,
+    });
+    expect(body.models['qwen3.8-flash'].contextWindow).toBe(262144);
+    // Structurally no pricing anywhere in the served document.
+    const keys: string[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object')
+        for (const [k, child] of Object.entries(v)) {
+          keys.push(k);
+          walk(child);
+        }
+    };
+    walk(body);
+    expect(keys.filter((k) => /price|pricing|cost|charge/i.test(k))).toEqual(
+      [],
+    );
+  });
+
+  it('a drifted model still saves — and the declared 1M survives verbatim (MC-5 advisory)', async () => {
+    const configPath = sandboxConfig();
+    // The model carries the known drift cell 1,000,000 vs snapshot 262,144.
+    const drift = await (await get('/api/status')).json();
+    expect(drift['drift']).toContainEqual({
+      provider: 'nan',
+      model: 'qwen3.8-flash',
+      field: 'contextWindow',
+      declared: 1000000,
+      snapshot: 262144,
+      advisory: true,
+    });
+    // Drift never blocks: an ordinary edit to the drifted entry saves fine.
+    const res = await put('/api/providers/nan/models/qwen3.8-flash', {
+      hash: hashOf(configPath),
+      model: { name: 'Renamed despite drift' },
+    });
+    expect(res.status).toBe(200);
+    // Drift never rewrites: the declared contextWindow is byte-identical.
+    const entry = modelsOf(treeOf(configPath), 'nan')[
+      'qwen3.8-flash'
+    ] as Record<string, unknown>;
+    expect(entry['contextWindow']).toBe(1000000);
+    expect(entry['name']).toBe('Renamed despite drift');
+    // And the drift cell is still there afterwards (nothing was corrected).
+    const after = await (await get('/api/status')).json();
+    expect(after['drift']).toContainEqual(
+      expect.objectContaining({
+        model: 'qwen3.8-flash',
+        declared: 1000000,
+        snapshot: 262144,
+      }),
+    );
   });
 });
 

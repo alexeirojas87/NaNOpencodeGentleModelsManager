@@ -2,8 +2,8 @@
 // load() (WU2) + maskConfig() (WU2) compose the ConfigResponse. apiKey values
 // never leave the server (CX-2); agents are projected generically from ALL
 // `agent.*` entries (OA-1 — 0..N, no hardcoded subset); auth.json is a
-// top-level-keys existence reference only (out-of-scope: values); snapshotAsOf
-// is null until the bundled NaN snapshot ships in WU7.
+// top-level-keys existence reference only (out-of-scope: values). Since WU7
+// snapshotAsOf reports the real bundled snapshot (offline bundle, CX-4).
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,7 @@ import type {
   MaskedConfigTree,
   MaskedProvider,
 } from '../../../shared/types';
+import { nanSnapshot } from '../catalog';
 import { load } from '../config/load';
 import { maskConfig } from '../config/mask';
 import { isRecord, respondError } from './http';
@@ -65,7 +66,8 @@ configRoute.get('/config', async (c) => {
       agents: (masked.agent ?? {}) as Record<string, AgentConfigEntry>,
       defaultAgent: masked.default_agent,
       authJson: { exists: await authJsonExists() },
-      snapshotAsOf: null, // the bundled snapshot ships in WU7
+      // The real bundled value — the snapshot ships offline with the app (CX-4).
+      snapshotAsOf: nanSnapshot.asOf,
     };
     return c.json(body);
   } catch (err) {

@@ -2,8 +2,16 @@
 // these fetch calls: the browser never touches the filesystem, and apiKey
 // values never exist in this layer (CX-2 — the server ships masked
 // {configured} presences only; writes carry user-typed strings or nothing).
-// DTOs are the shared contracts from shared/types.ts, never redeclared here.
-import type { ConfigResponse, WriteResponse } from '../../shared/types';
+// WU7 extends it with the model-entry CRUD calls plus the status/catalog
+// reads the Models view needs. DTOs are the shared contracts from
+// shared/types.ts, never redeclared here.
+import type {
+  CatalogResponse,
+  ConfigResponse,
+  ModelConfig,
+  StatusResponse,
+  WriteResponse,
+} from '../../shared/types';
 
 /** Shape guard for JSON payloads of unknown origin. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,4 +98,62 @@ export function putProvider(
     `/api/providers/${encodeURIComponent(id)}`,
     write,
   ) as Promise<WriteResponse>;
+}
+
+/**
+ * WU7 — model-entry CRUD (design §API-Surface). Model writes are WHOLE-entry
+ * (the allowlist stops at provider.<id>.models.<mid>, patch.ts), so a PUT
+ * carries the merged ModelConfig and an absent field is never invented (MC-1).
+ * `hash` is the current base on every call; a 409/`stale` ApiError carries
+ * {expected, actual} exactly like the provider writes (SCW-2).
+ */
+export function postModel(
+  providerId: string,
+  modelId: string,
+  model: ModelConfig,
+  hash: string,
+): Promise<WriteResponse> {
+  return request(
+    'POST',
+    `/api/providers/${encodeURIComponent(providerId)}/models`,
+    { hash, modelId, model },
+  ) as Promise<WriteResponse>;
+}
+
+export function putModel(
+  providerId: string,
+  modelId: string,
+  model: ModelConfig,
+  hash: string,
+): Promise<WriteResponse> {
+  return request(
+    'PUT',
+    `/api/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}`,
+    { hash, model },
+  ) as Promise<WriteResponse>;
+}
+
+export function deleteModel(
+  providerId: string,
+  modelId: string,
+  hash: string,
+): Promise<WriteResponse> {
+  return request(
+    'DELETE',
+    `/api/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}`,
+    { hash },
+  ) as Promise<WriteResponse>;
+}
+
+/** Identity + advisory drift for the Status view and Models chip source (WU7). */
+export function getStatus(): Promise<StatusResponse> {
+  return request('GET', '/api/status') as Promise<StatusResponse>;
+}
+
+/**
+ * The bundled offline NaN catalog (MC-3 pre-fill source). Served via /api so
+ * the browser never touches the filesystem; shipped with the app (CX-4).
+ */
+export function getCatalog(): Promise<CatalogResponse> {
+  return request('GET', '/api/catalog') as Promise<CatalogResponse>;
 }

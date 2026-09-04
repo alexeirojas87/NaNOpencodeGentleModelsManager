@@ -1,16 +1,17 @@
 // WU5.3 — GET /api/status (design §API-Surface). Minimal honest fields:
 // current CONFIG identity (path/hash/mtime) for staleness display, the
 // dashboard-owned backup inventory newest-first (restore points, SCW-4),
-// and the process-local restart flag (CX-3 carrier). drift[] and
-// snapshotAsOf remain empty/null until the bundled NaN snapshot ships in
-// WU7 — declaring drift needs a snapshot to compare against, and the
-// dashboard never guesses (MC-5).
+// and the process-local restart flag (CX-3 carrier). Since WU7 the drift[]
+// and snapshotAsOf report REAL cells: declared-vs-snapshot contextWindow
+// comparisons from the bundled catalog — advisory only, never blocking
+// (MC-5: the save pipeline never consults this endpoint).
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { Hono } from 'hono';
 
 import type { StatusResponse } from '../../../shared/types';
+import { computeDrift, nanSnapshot } from '../catalog';
 import { load } from '../config/load';
 import { defaultBackupDir } from '../config/backup';
 import { respondError, restartRequired } from './http';
@@ -39,8 +40,10 @@ statusRoute.get('/status', async (c) => {
       path: loaded.path,
       hash: loaded.hash,
       mtime: loaded.mtimeMs,
-      drift: [],
-      snapshotAsOf: null,
+      // Advisory cells only (MC-5) — providers that do not match the
+      // snapshot's npm+name metadata contribute nothing (generic 0..N).
+      drift: computeDrift(loaded.tree),
+      snapshotAsOf: nanSnapshot.asOf,
       backups,
       restartRequired: restartRequired(),
     };
