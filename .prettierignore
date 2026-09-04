@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.atl/
+pnpm-lock.yaml
+# User-authored agent instructions — leave formatting untouched.
+AGENTS.md
+# Golden fixture must stay byte-identical to JSON.stringify(tree, null, 2)
+# (no trailing newline) for the SCW-6 round-trip invariant.
+test/fixtures/config.sample.json

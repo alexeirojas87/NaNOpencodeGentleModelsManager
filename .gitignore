@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# test coverage
+coverage/
+
+# machine-local skill registry (not part of the project)
+.atl/
+
+# misc
+*.log
+.DS_Store
