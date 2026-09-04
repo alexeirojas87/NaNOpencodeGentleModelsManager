@@ -162,11 +162,14 @@ function scriptApi(
   opts: {
     gets?: ConfigResponse[];
     puts?: { status: number; body: unknown }[];
+    /** WU9 — queued replies for POST /api/sync (fails loud when exhausted). */
+    syncs?: { status: number; body: unknown }[];
   } = {},
 ) {
   const calls: Call[] = [];
   const gets = [...(opts.gets ?? [fixture(sampleAgents())])];
   const puts = [...(opts.puts ?? [])];
+  const syncs = [...(opts.syncs ?? [])];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -188,6 +191,11 @@ function scriptApi(
       if (method === 'PUT' && /^\/api\/agents\/[^/]+\/model$/.test(url)) {
         const reply = puts.shift();
         if (!reply) throw new Error(`PUT script exhausted at ${url}`);
+        return json(reply.status, reply.body);
+      }
+      if (method === 'POST' && url === '/api/sync') {
+        const reply = syncs.shift();
+        if (!reply) throw new Error('POST /api/sync script exhausted');
         return json(reply.status, reply.body);
       }
       return json(404, {
@@ -619,5 +627,97 @@ describe('Orchestration — empty state (0..N)', () => {
     render(<OrchestrationView />);
     expect(await screen.findByText('No agents declared')).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
+  });
+});
+
+describe('Orchestration — sync panel pass-through re-baselines the list (WU9, OA-3)', () => {
+  /** Sync reply for the view-level queue. */
+  const syncReply = (
+    exitCode: number,
+    extra: Record<string, unknown> = {},
+  ): { status: number; body: unknown } => ({
+    status: 200,
+    body: {
+      ok: true,
+      exitCode,
+      stdout: 'gentle-ai sync: prompt table refreshed\n',
+      stderr: '',
+      ...extra,
+    },
+  });
+
+  it('a successful sync re-GETs /api/config and the list reflects post-sync agents', async () => {
+    const pre = fixture(sampleAgents());
+    const post = fixture(
+      sampleAgents({ 'post-sync-agent': { model: 'nan/qwen3.6' } }),
+    );
+    post.hash = 'hash-post-sync';
+    const { calls } = scriptApi({
+      gets: [pre, post],
+      syncs: [syncReply(0, { hash: 'hash-post-sync' })],
+    });
+    await rendered();
+    // Pre-sync the agent does not exist anywhere generic-derived.
+    expect(
+      within(otherTable()).queryByRole('row', { name: 'post-sync-agent' }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run sync' }));
+    expect(await screen.findByText('exit 0')).toBeTruthy();
+
+    // The panel's success path asked the parent to refresh, and the parent
+    // re-read CONFIG: GET /api/config ran exactly twice.
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2);
+    await waitFor(() =>
+      expect(
+        within(otherTable()).getByRole('row', { name: 'post-sync-agent' }),
+      ).toBeTruthy(),
+    );
+    expect(picker('post-sync-agent').value).toBe('nan/qwen3.6');
+    expect(screen.getByText(/Sync succeeded — CONFIG reloaded/)).toBeTruthy();
+  });
+
+  it('a failed sync surfaces output + failure chip but never reloads or claims success', async () => {
+    const { calls } = scriptApi({
+      syncs: [
+        syncReply(2, {
+          stdout: 'gentle-ai sync: starting\n',
+          stderr: 'sync aborted\n',
+        }),
+      ],
+    });
+    await rendered();
+    fireEvent.click(screen.getByRole('button', { name: 'Run sync' }));
+    expect(await screen.findByText('exit 2')).toBeTruthy();
+    expect(screen.getByText(/sync aborted/)).toBeTruthy();
+    expect(screen.queryByText(/Sync succeeded/)).toBeNull();
+    // Still the single initial GET — nothing re-baselined on failure.
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1);
+  });
+
+  it('a successful sync clears the OA-3 "run gentle-ai sync" advisory it answers', async () => {
+    const { calls } = scriptApi({
+      puts: [okWrite('echo-A')],
+      syncs: [syncReply(0, { hash: 'echo-A' })],
+    });
+    await rendered();
+    // A saved model edit raises the advisory (WU8 flow, intact).
+    setModel('sdd-spec', 'nan/qwen3.6');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Restart OpenCode to apply');
+    expect(
+      screen.getByText('run gentle-ai sync to refresh prompt table'),
+    ).toBeTruthy();
+
+    // Running the sync from the panel IS that advice; it clears once done.
+    fireEvent.click(screen.getByRole('button', { name: 'Run sync' }));
+    expect(await screen.findByText('exit 0')).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.queryByText('run gentle-ai sync to refresh prompt table'),
+      ).toBeNull(),
+    );
+    // And the list refresh re-anchored the view on the fresh CONFIG (2 GETs).
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2);
   });
 });

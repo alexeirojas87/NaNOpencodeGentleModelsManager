@@ -138,6 +138,23 @@ export interface WriteResponse {
 }
 
 /**
+ * POST /api/sync response (design §API-Surface, OA-3). The gentle-ai sync
+ * CLI's exit code and output ship verbatim; `hash` is present ONLY after an
+ * exit-0 run, carrying the reloaded CONFIG base so the client re-baselines
+ * without racing its own follow-up GET. A non-zero exit ships NO hash — the
+ * dashboard must not claim a success state for a failed sync.
+ */
+export interface SyncResponse {
+  ok: true;
+  /** Process exit code of the sync run; 0 is the only success state. */
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  /** Fresh CONFIG hash after a successful (exit-0) reload; absent on failure. */
+  hash?: string;
+}
+
+/**
  * GET /api/status response envelope (design §API-Surface).
  * WU7 fills `drift`/`snapshotAsOf` from the bundled NaN snapshot; `backups`
  * lists restore points newest-first (SCW-4).

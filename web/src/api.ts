@@ -10,6 +10,7 @@ import type {
   ConfigResponse,
   ModelConfig,
   StatusResponse,
+  SyncResponse,
   WriteResponse,
 } from '../../shared/types';
 
@@ -174,4 +175,21 @@ export function getStatus(): Promise<StatusResponse> {
  */
 export function getCatalog(): Promise<CatalogResponse> {
   return request('GET', '/api/catalog') as Promise<CatalogResponse>;
+}
+
+/**
+ * WU9 — POST /api/sync (OA-3): ask the server to run the gentle-ai sync CLI
+ * and report {exitCode, stdout, stderr}. `args` is optional and stays
+ * server-allowlisted (the panel runs the bare, unchanged sync — flags exist
+ * for callers that legitimately need them; injection attempts 400 upstream).
+ * A non-zero exit RESOLVES with the outcome; only a failed REQUEST throws.
+ * On exit 0 the response carries the reloaded CONFIG hash (the caller then
+ * re-GETs /api/config so the matrix/list reflect sync's writes).
+ */
+export function runSync(args?: string[]): Promise<SyncResponse> {
+  return request(
+    'POST',
+    '/api/sync',
+    args === undefined ? {} : { args },
+  ) as Promise<SyncResponse>;
 }

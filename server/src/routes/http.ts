@@ -15,6 +15,7 @@ import type { WriteResponse } from '../../../shared/types';
 import { ConfigLoadError, load, type LoadedConfig } from '../config/load';
 import { PatchError, type PatchOp } from '../config/patch';
 import { SaveError, save, type SaveExpected } from '../config/save';
+import { SyncError } from '../sync';
 
 /** A failure that already knows its HTTP status; wrapped by respondError. */
 export class HttpError extends Error {
@@ -52,6 +53,18 @@ export function toHttpError(err: unknown): HttpError {
     if (err.code === 'parse')
       return new HttpError(422, 'config_unparseable', err.message);
     return new HttpError(500, 'config_io', err.message);
+  }
+  if (err instanceof SyncError) {
+    const extra: Record<string, unknown> = {};
+    if (err.argIndex !== undefined) extra.argIndex = err.argIndex;
+    if (err.arg !== undefined) extra.arg = err.arg;
+    if (err.code === 'sync_bad_args')
+      return new HttpError(400, err.code, err.message, extra);
+    // sync_timeout (504) / sync_output_limit + spawn failures (500): the
+    // request itself failed — the sync OUTCOME path is the 200 SyncResponse.
+    if (err.code === 'sync_timeout')
+      return new HttpError(504, err.code, err.message, extra);
+    return new HttpError(500, err.code, err.message, extra);
   }
   return new HttpError(
     500,

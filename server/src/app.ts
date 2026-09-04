@@ -16,6 +16,7 @@ import { configRoute } from './routes/config';
 import { modelsRoute } from './routes/models';
 import { providersRoute } from './routes/providers';
 import { statusRoute } from './routes/status';
+import { syncRoute } from './routes/sync';
 
 export const app = new Hono();
 
@@ -28,6 +29,8 @@ app.route('/api', providersRoute);
 app.route('/api', modelsRoute);
 app.route('/api', agentsRoute);
 app.route('/api', statusRoute);
+// WU9: gentle-ai sync pass-through (OA-3) — argv allowlist, execFile, reload.
+app.route('/api', syncRoute);
 
 // Production static serving (design §Architecture "Layout"): `pnpm build`
 // emits the web bundle to repo-root dist/; when it exists the same server

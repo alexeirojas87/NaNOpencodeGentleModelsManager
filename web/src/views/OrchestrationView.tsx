@@ -27,6 +27,7 @@ import {
   type ConflictRow,
 } from '../components/ConflictModal';
 import { SaveBar } from '../components/SaveBar';
+import { SyncPanel } from '../components/SyncPanel';
 
 /** Pending user choice per agent: string = set, null = clear, absent = untouched. */
 type Edits = Record<string, string | null>;
@@ -482,6 +483,18 @@ export default function OrchestrationView() {
             ))}
           </tbody>
         </table>
+      </section>
+
+      {/* WU9 (OA-3): the sync action the advisory above points at. A
+          successful run reloads CONFIG through the generic reload path, so
+          the matrix and list reflect whatever gentle-ai sync wrote. */}
+      <section className="orch-section">
+        <SyncPanel
+          onSynced={() => {
+            setSyncAdvisory(false);
+            void reload();
+          }}
+        />
       </section>
 
       <SaveBar
