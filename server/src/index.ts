@@ -1,11 +1,13 @@
-// Bootstrap placeholder so `pnpm dev` and the server project have an entry
-// point. Replaced by the full Hono app (routes, localhost-only binding
-// formalized, prod static serving) in WU5 — see sdd/model-dashboard/tasks 5.1.
+// WU5.1 — server entry point. CX-1: the socket binds 127.0.0.1 ONLY
+// (0.0.0.0 would leak the apiKey-bearing surface onto the LAN; the app has
+// no auth by design — single user, localhost). The app itself lives in
+// ./app so tests can call app.request() without opening a port.
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
 
-const app = new Hono();
+import { app } from './app';
 
-app.get('/api/health', (c) => c.json({ ok: true }));
-
-serve({ fetch: app.fetch, port: 8787, hostname: '127.0.0.1' });
+serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 8787 }, (info) => {
+  console.log(
+    `model-dashboard serving on http://127.0.0.1:${info.port} (localhost-only, CX-1)`,
+  );
+});

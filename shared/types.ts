@@ -136,3 +136,24 @@ export interface WriteResponse {
   ok: true;
   hash: string;
 }
+
+/**
+ * GET /api/status response envelope (design §API-Surface).
+ * `drift` and `snapshotAsOf` stay empty/null until the bundled NaN snapshot
+ * ships in WU7; `backups` lists restore points newest-first (SCW-4).
+ */
+export interface StatusResponse {
+  /** Resolved CONFIG path (sandbox-aware via CONFIG_PATH). */
+  path: string;
+  /** Current content hash — same staleness signal as GET /api/config. */
+  hash: string;
+  /** CONFIG mtime in epoch milliseconds. */
+  mtime: number;
+  /** Declared-vs-snapshot drift cells (WU7). */
+  drift: unknown[];
+  snapshotAsOf: string | null;
+  /** Backup file paths, newest first. */
+  backups: string[];
+  /** True once this server process has written CONFIG (CX-3 carrier). */
+  restartRequired: boolean;
+}
