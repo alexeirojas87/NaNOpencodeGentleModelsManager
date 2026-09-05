@@ -8,15 +8,17 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -41,6 +43,7 @@ interface Envelope {
     opIndex?: number;
     expected?: string;
     actual?: string;
+    field?: string;
     issues?: { path: string; message: string }[];
   };
 }
@@ -703,5 +706,418 @@ describe('CONFIG load failures (PC-1)', () => {
     expect(res.status).toBe(422);
     expect((await envelope(res)).error?.code).toBe('config_unparseable');
     expect(readFileSync(configPath, 'utf8')).toBe('{not valid json!!');
+  });
+});
+
+// --- orchestration-v2 WU-A: POST /api/agents gate chain (AC-1..AC-7) ---------
+/** Seed an agent entry straight into the sandbox CONFIG (bypasses the API —
+ * models hand-written CONFIG, e.g. the file-ref prompts the route forbids). */
+function seedAgent(configPath: string, name: string, entry: unknown): void {
+  const tree = treeOf(configPath);
+  tree.agent = { ...tree.agent, [name]: entry };
+  writeFileSync(configPath, JSON.stringify(tree, null, 2));
+}
+
+const validBody = (
+  hash: string,
+  name: string,
+  agent: Record<string, unknown>,
+) => ({ hash, name, agent });
+/** Minimal gate-passing agent body reused across the mutation-gate describes. */
+const P = { prompt: 'Gate matrix body.' };
+
+describe('POST /api/agents — happy path (AC-1, AC-6, AC-7)', () => {
+  it('creates agent.<name>; siblings byte-identical; echoes the fresh hash', async () => {
+    const configPath = sandboxConfig();
+    const before = readFileSync(configPath, 'utf8');
+    const res = await post('/api/agents', {
+      hash: sha256(before),
+      name: 'my-helper',
+      agent: {
+        model: 'nan/qwen3.6',
+        description: 'Helper',
+        prompt: 'Do the assigned thing well.',
+      },
+    });
+    expect(res.status).toBe(200);
+    const w = await envelope(res);
+    expect(w.ok).toBe(true);
+    // AC-7: the echoed hash IS the new on-disk hash — feeds the next save.
+    expect(w.hash).toBe(hashOf(configPath));
+    const after = readFileSync(configPath, 'utf8');
+    expect(changedLines(before, after).removed).toEqual([]); // siblings byte-stable
+    const entry = treeOf(configPath).agent?.['my-helper'] as Record<
+      string,
+      unknown
+    >;
+    expect(entry).toEqual({
+      model: 'nan/qwen3.6',
+      description: 'Helper',
+      prompt: 'Do the assigned thing well.',
+    });
+    expect(Object.keys(entry)).toEqual(['model', 'description', 'prompt']);
+    // Success echo chains: the returned hash is accepted by the next write.
+    const next = await put('/api/agents/my-helper/model', {
+      hash: w.hash,
+      model: 'nan/glm5.3-flash',
+    });
+    expect(next.status).toBe(200);
+  });
+
+  it('omitted model is legal — the entry carries no model key (AC-6)', async () => {
+    const configPath = sandboxConfig();
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'default-runner', {
+        prompt: 'Runs with the runtime default model.',
+      }),
+    );
+    expect(res.status).toBe(200);
+    const entry = treeOf(configPath).agent?.['default-runner'] as object;
+    expect(entry).toEqual({ prompt: 'Runs with the runtime default model.' });
+  });
+
+  it('AC-8 precondition: the created agent appears in GET /api/config', async () => {
+    const configPath = sandboxConfig();
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'listed-agent', {
+        prompt: 'Generic placement comes from the view side.',
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await (await get('/api/config')).json()) as ConfigResponse;
+    expect(Object.keys(body.agents)).toContain('listed-agent');
+  });
+});
+
+describe('POST /api/agents — every 400 gate is pre-mutation (zero bytes, zero backups)', () => {
+  const GATES: [string, unknown, Record<string, unknown>, string, string?][] = [
+    ['name with space', 'my agent', P, 'name_invalid'],
+    ['name with slash', 'a/b', P, 'name_invalid'],
+    ['empty name', '', P, 'name_invalid'],
+    ['dot name', '.', P, 'name_invalid'],
+    ['dotdot name', '..', P, 'name_invalid'],
+    ['proto-set name', '__proto__', P, 'name_invalid'],
+    ['constructor name', 'constructor', P, 'name_invalid'],
+    ['sdd- prefix', 'sdd-mine', P, 'reserved_name'],
+    ['jd- prefix', 'jd-runner', P, 'reserved_name'],
+    ['review- prefix', 'review-mine', P, 'reserved_name'],
+    ['bare general', 'general', P, 'reserved_name'],
+    ['bare explore', 'explore', P, 'reserved_name'],
+    ['bare orchestrator', 'gentle-orchestrator', P, 'reserved_name'],
+    [
+      'tools key',
+      'extra-tools',
+      { description: 'd', prompt: 'p', tools: { bash: false } },
+      'unknown_field',
+      'tools',
+    ],
+    [
+      'marker key',
+      'extra-marker',
+      { prompt: 'p', 'gentle-ai:phase': 'sdd-spec' },
+      'unknown_field',
+      'gentle-ai:phase',
+    ],
+    ['prompt absent', 'no-prompt', { description: 'd' }, 'prompt_required'],
+    ['prompt empty', 'empty-prompt', { prompt: '' }, 'prompt_required'],
+    ['prompt non-string', 'num-prompt', { prompt: 42 }, 'prompt_invalid'],
+    [
+      'file-ref prompt',
+      'ref-prompt',
+      { prompt: '{file:./prompts/sdd/sdd-spec.md}' },
+      'file_ref_rejected',
+    ],
+    [
+      'oversized prompt',
+      'big-prompt',
+      { prompt: 'x'.repeat(70 * 1024) },
+      'prompt_too_large',
+    ],
+    [
+      'ghost model',
+      'ghost-model',
+      { ...P, model: 'nan/not-installed' },
+      'model_unknown',
+    ],
+    [
+      'unknown provider',
+      'ghost-pair',
+      { ...P, model: 'ghost/x' },
+      'model_unknown',
+    ],
+    ['non-string model', 'num-model', { ...P, model: 5 }, 'model_unknown'],
+  ];
+
+  it.each(GATES)('%s → 400 %j', async (_label, name, agent, code, field) => {
+    const configPath = sandboxConfig();
+    const dir = dirname(configPath);
+    const before = readFileSync(configPath, 'utf8');
+    const res = await post(
+      '/api/agents',
+      validBody(
+        sha256(before),
+        name as string,
+        agent as Record<string, unknown>,
+      ),
+    );
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error?.code).toBe(code);
+    if (field !== undefined) expect(body.error?.field).toBe(field);
+    // Zero mutation: bytes are still the fixture verbatim…
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+    // …and the save pipeline never even reached the backup stage.
+    expect(backupFiles(dir)).toEqual([]);
+  });
+
+  it('gate order is deterministic: reserved name + missing prompt → reserved_name first', async () => {
+    const configPath = sandboxConfig();
+    const res = await post('/api/agents', {
+      hash: hashOf(configPath),
+      name: 'sdd-shadow',
+      agent: {},
+    });
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
+  });
+
+  it('blocklist is case-sensitive by spec: Explore and bare sdd are accepted', async () => {
+    const configPath = sandboxConfig();
+    const first = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'Explore', P),
+    );
+    expect(first.status).toBe(200);
+    const w1 = await envelope(first);
+    const second = await post(
+      '/api/agents',
+      validBody(w1.hash as string, 'sdd', P),
+    );
+    expect(second.status).toBe(200);
+  });
+
+  it('agent must be a record → 400 bad_request', async () => {
+    const configPath = sandboxConfig();
+    const res = await post('/api/agents', {
+      hash: hashOf(configPath),
+      name: 'shape-case',
+      agent: 'not-an-object',
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('bad_request');
+  });
+});
+
+describe('POST /api/agents — exists-gate and hash chain (AC-1, AC-7, SCW-2)', () => {
+  it('second create of the same name → 400 agent_exists; bytes unchanged', async () => {
+    const configPath = sandboxConfig();
+    const dir = dirname(configPath);
+    const first = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'dup-agent', P),
+    );
+    expect(first.status).toBe(200);
+    const bytes = readFileSync(configPath, 'utf8');
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'dup-agent', P),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('agent_exists');
+    expect(readFileSync(configPath, 'utf8')).toBe(bytes);
+    // No new backup beyond the first create's restore point.
+    expect(backupFiles(dir)).toHaveLength(1);
+  });
+
+  it('stale base → 409 {expected,actual}, no write, no backup (SCW-2)', async () => {
+    const configPath = sandboxConfig();
+    const dir = dirname(configPath);
+    const base = hashOf(configPath);
+    seedAgent(configPath, 'external-writer', P); // CONFIG moved after load
+    const res = await post('/api/agents', validBody(base, 'late-agent', P));
+    expect(res.status).toBe(409);
+    const body = await envelope(res);
+    expect(body.error?.code).toBe('stale');
+    expect(body.error?.expected).toBe(base);
+    expect(body.error?.actual).toBe(hashOf(configPath));
+    expect(Object.keys(treeOf(configPath).agent ?? {})).not.toContain(
+      'late-agent',
+    );
+    expect(backupFiles(dir)).toEqual([]);
+  });
+
+  it('exists + stale race shape → 409 wins (the hash chain is the serializer)', async () => {
+    const configPath = sandboxConfig();
+    const first = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'dup-agent', P),
+    );
+    expect(first.status).toBe(200);
+    const staleHash = (await envelope(first)).hash as string;
+    seedAgent(configPath, 'external-writer', P); // move CONFIG past the echo
+    const res = await post('/api/agents', validBody(staleHash, 'dup-agent', P));
+    expect(res.status).toBe(409);
+    expect((await envelope(res)).error?.code).toBe('stale');
+  });
+});
+
+// --- GET /api/templates (AT-1) ------------------------------------------------
+describe('GET /api/templates — exactly 4 bundled presets (AT-1)', () => {
+  it('serves {templates:[reviewer,executor,orchestrator,blank]} in shape', async () => {
+    sandboxConfig();
+    const res = await get('/api/templates');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      templates: {
+        id: string;
+        label: string;
+        description: string;
+        prompt: string;
+      }[];
+    };
+    expect(Object.keys(body)).toEqual(['templates']);
+    expect(body.templates.map((t) => t.id)).toEqual([
+      'reviewer',
+      'executor',
+      'orchestrator',
+      'blank',
+    ]);
+    for (const t of body.templates) {
+      expect(Object.keys(t).sort()).toEqual([
+        'description',
+        'id',
+        'label',
+        'prompt',
+      ]);
+      expect(t.label.length).toBeGreaterThan(0);
+      expect(t.description.length).toBeGreaterThan(0);
+      // AC-5-compatible presets: non-empty inline text, no refs, no markers.
+      expect(typeof t.prompt).toBe('string');
+      expect(t.prompt.trim().length).toBeGreaterThan(0);
+      expect(Buffer.byteLength(t.prompt, 'utf8')).toBeLessThanOrEqual(65536);
+      expect(t.prompt).not.toContain('{file:');
+      expect(t.prompt).not.toContain('gentle-ai:');
+    }
+  });
+});
+
+// --- GET /api/agents/:name/prompt (D4: AT-2 materialization) ------------------
+describe('GET /api/agents/:name/prompt — read-only resolve (D4, AT-2)', () => {
+  it('inline prompt passes through verbatim', async () => {
+    const configPath = sandboxConfig();
+    const created = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'reader-inline', {
+        prompt: 'Inline text stays exactly as stored.',
+      }),
+    );
+    expect(created.status).toBe(200);
+    const res = await get('/api/agents/reader-inline/prompt');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      name: 'reader-inline',
+      source: 'inline',
+      prompt: 'Inline text stays exactly as stored.',
+    });
+  });
+
+  it('{file:./…} ref materializes from the config dir (clone source)', async () => {
+    const configPath = sandboxConfig();
+    mkdirSync(join(dirname(configPath), 'prompts'), { recursive: true });
+    writeFileSync(
+      join(dirname(configPath), 'prompts', 'ok.md'),
+      'MATERIALIZED.\n',
+    );
+    seedAgent(configPath, 'ref-agent', { prompt: '{file:./prompts/ok.md}' });
+    const res = await get('/api/agents/ref-agent/prompt');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      name: 'ref-agent',
+      source: 'file',
+      ref: './prompts/ok.md',
+      prompt: 'MATERIALIZED.\n',
+    });
+  });
+
+  it('../ ref never escapes the config dir — fail-closed, no bytes leak', async () => {
+    const configPath = sandboxConfig();
+    writeFileSync(join(sandbox, 'outside-secret.md'), 'TOP-SECRET-OUTSIDE');
+    seedAgent(configPath, 'escape-agent', {
+      prompt: '{file:./../outside-secret.md}',
+    });
+    const res = await get('/api/agents/escape-agent/prompt');
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect((JSON.parse(text) as Envelope).error?.code).toBe(
+      'prompt_unavailable',
+    );
+    expect(text).not.toContain('TOP-SECRET-OUTSIDE');
+  });
+
+  it('absolute ref is rejected without touching the fs', async () => {
+    const configPath = sandboxConfig();
+    seedAgent(configPath, 'abs-agent', { prompt: '{file:/etc/passwd}' });
+    const res = await get('/api/agents/abs-agent/prompt');
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect((JSON.parse(text) as Envelope).error?.code).toBe(
+      'prompt_unavailable',
+    );
+    expect(text).not.toContain('root:');
+  });
+
+  it('symlink pointing outside the config dir → 404 (realpath containment)', async () => {
+    const configPath = sandboxConfig();
+    writeFileSync(join(sandbox, 'outside-secret.md'), 'TOP-SECRET-OUTSIDE');
+    mkdirSync(join(dirname(configPath), 'prompts'), { recursive: true });
+    symlinkSync(
+      join(sandbox, 'outside-secret.md'),
+      join(dirname(configPath), 'prompts', 'link.md'),
+    );
+    seedAgent(configPath, 'symlink-agent', {
+      prompt: '{file:./prompts/link.md}',
+    });
+    const res = await get('/api/agents/symlink-agent/prompt');
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect((JSON.parse(text) as Envelope).error?.code).toBe(
+      'prompt_unavailable',
+    );
+    expect(text).not.toContain('TOP-SECRET-OUTSIDE');
+  });
+
+  it('missing file → 404 prompt_unavailable with no content', async () => {
+    const configPath = sandboxConfig();
+    seedAgent(configPath, 'ghost-file', { prompt: '{file:./prompts/gone.md}' });
+    const res = await get('/api/agents/ghost-file/prompt');
+    expect(res.status).toBe(404);
+    expect((await envelope(res)).error?.code).toBe('prompt_unavailable');
+  });
+
+  it('resolved file over 64 KiB → 400 prompt_too_large (AT-3 source side)', async () => {
+    const configPath = sandboxConfig();
+    mkdirSync(join(dirname(configPath), 'prompts'), { recursive: true });
+    writeFileSync(
+      join(dirname(configPath), 'prompts', 'big.md'),
+      'B'.repeat(70 * 1024),
+    );
+    seedAgent(configPath, 'big-file', { prompt: '{file:./prompts/big.md}' });
+    const res = await get('/api/agents/big-file/prompt');
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('prompt_too_large');
+  });
+
+  it('promptless agent and unknown/__proto__ names all 404 — never a 500', async () => {
+    sandboxConfig(); // sdd-spec holds description only — no prompt to resolve
+    const noPrompt = await get('/api/agents/sdd-spec/prompt');
+    expect(noPrompt.status).toBe(404);
+    expect((await envelope(noPrompt)).error?.code).toBe('prompt_unavailable');
+    const ghost = await get('/api/agents/never-existed/prompt');
+    expect(ghost.status).toBe(404);
+    expect((await envelope(ghost)).error?.code).toBe('agent_not_found');
+    const proto = await get('/api/agents/__proto__/prompt');
+    expect(proto.status).toBe(404);
+    expect((await envelope(proto)).error?.code).toBe('agent_not_found');
   });
 });

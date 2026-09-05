@@ -42,10 +42,17 @@ export function toHttpError(err: unknown): HttpError {
       : new HttpError(400, 'invalid', err.message, { issues: err.issues });
   }
   if (err instanceof PatchError) {
-    return new HttpError(400, err.code, err.message, {
-      path: err.path,
-      opIndex: err.opIndex,
-    });
+    // orchestration-v2 D1/AC-1: the set-only create row surfaces 'exists'
+    // from patch(); the wire-level code for that rejection is agent_exists.
+    return new HttpError(
+      400,
+      err.code === 'exists' ? 'agent_exists' : err.code,
+      err.message,
+      {
+        path: err.path,
+        opIndex: err.opIndex,
+      },
+    );
   }
   if (err instanceof ConfigLoadError) {
     if (err.code === 'missing')

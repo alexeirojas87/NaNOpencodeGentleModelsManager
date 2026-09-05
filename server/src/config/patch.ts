@@ -16,6 +16,8 @@
 //   provider.<id>.options.baseURL | provider.<id>.options.apiKey
 //   provider.<id>.models.<model-id>      (whole entries only)
 //   agent.<name>.model | .description | .temperature | .variant
+//   agent.<name>          (whole entry — SET-ONLY, value ops with insert===true,
+//                          create via POST /api/agents; never update or delete)
 //   default_agent
 import type { ConfigTree } from '../../../shared/types';
 
@@ -26,6 +28,13 @@ export interface PatchOp {
   value?: unknown;
   /** Delete the key at `path` (missing keys make the op a no-op). */
   remove?: boolean;
+  /**
+   * Create-only flag (SCW-7 set-only row, design D1): the length-2 path
+   * ["agent", name] is allowlisted ONLY as a value op with insert===true,
+   * and an already-present entry throws PatchError('exists') — a set-only
+   * row can never turn into a silent update or a delete.
+   */
+  insert?: boolean;
 }
 
 export interface PatchOutcome {
@@ -34,7 +43,7 @@ export interface PatchOutcome {
   applied: number;
 }
 
-export type PatchErrorCode = 'off_allowlist' | 'bad_op';
+export type PatchErrorCode = 'off_allowlist' | 'bad_op' | 'exists';
 
 /** Rejected patch. `path` names the offending dot path for 400 responses. */
 export class PatchError extends Error {
@@ -80,7 +89,7 @@ function isId(segment: string | undefined): segment is string {
 }
 
 /** Exact Allowlist match for a dot path (SCW-7). */
-function isAllowlisted(path: readonly string[]): boolean {
+function isAllowlisted(path: readonly string[], op: PatchOp): boolean {
   if (path.length === 1) return path[0] === 'default_agent';
   if (!isId(path[0])) return false;
 
@@ -93,6 +102,11 @@ function isAllowlisted(path: readonly string[]): boolean {
     return path.length === 4 && path[2] === 'models' && isId(path[3]);
   }
 
+  if (path[0] === 'agent' && isId(path[1]) && path.length === 2) {
+    // Whole-entry create row (SCW-7 set-only): admitted as a value op with
+    // the insert flag, nothing else — remove or bare value stays off-list.
+    return op.insert === true && !op.remove;
+  }
   return (
     path[0] === 'agent' &&
     isId(path[1]) &&
@@ -126,7 +140,7 @@ function checkOp(op: PatchOp, index: number): void {
       `Invalid patch operation at index ${index} on "${dotted}": provide exactly one of value or remove.`,
     );
   }
-  if (!isAllowlisted(op.path)) {
+  if (!isAllowlisted(op.path, op)) {
     throw new PatchError(
       'off_allowlist',
       dotted,
@@ -134,6 +148,16 @@ function checkOp(op: PatchOp, index: number): void {
       `Mutation outside the allowlist rejected at "${dotted}" — only allowlisted provider/agent paths and default_agent are writable.`,
     );
   }
+}
+
+/** Own-key existence of the leaf a set/insert op would write. */
+function leafPresent(root: ConfigTree, path: readonly string[]): boolean {
+  let cur: unknown = root;
+  for (const segment of path.slice(0, -1)) {
+    if (!isRecord(cur) || !(segment in cur)) return false;
+    cur = cur[segment];
+  }
+  return isRecord(cur) && Object.hasOwn(cur, path[path.length - 1]);
 }
 
 /** Removal whose chain or leaf does not exist is a no-op (same reference). */
@@ -177,7 +201,17 @@ export function patch(tree: ConfigTree, ops: readonly PatchOp[]): PatchOutcome {
   ops.forEach(checkOp);
 
   let current = tree;
-  for (const op of ops) {
+  for (const [opIndex, op] of ops.entries()) {
+    // Set-only create row: an insert over a present leaf is rejected here —
+    // still pre-disk, so the caller answers 400 agent_exists (SCW-7/AC-1).
+    if (op.insert && !op.remove && leafPresent(current, op.path)) {
+      throw new PatchError(
+        'exists',
+        op.path.join('.'),
+        opIndex,
+        `Create-only op rejected: "${op.path.join('.')}" already exists — this path is set-only (never update, never delete).`,
+      );
+    }
     if (op.remove && !removable(current, op.path)) continue;
     current = setIn(current, op.path, 0, op);
   }

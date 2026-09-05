@@ -227,6 +227,56 @@ describe('patch — rejects off-allowlist mutation naming the path (threat file-
   });
 });
 
+// --- orchestration-v2 D1 / SCW-7 set-only row (WU-A 1.1 RED) ---------------
+const ins = (path: string[], value: unknown): PatchOp => ({
+  path,
+  value,
+  insert: true,
+});
+
+describe('patch — set-only agent.<name> whole-entry row (SCW-7, D1)', () => {
+  it('accepts a length-2 agent value op ONLY with insert===true (create)', () => {
+    const tree = fixtureTree();
+    const entry = { description: 'helper', prompt: 'do the thing' };
+    const out = patch(tree, [ins(['agent', 'my-helper'], entry)]).tree
+      .agent as Record<string, unknown>;
+    expect(out['my-helper']).toEqual(entry);
+    // Inserted values are cloned — caller objects never alias into the tree.
+    expect(out['my-helper']).not.toBe(entry);
+  });
+
+  it('rejects bare value and remove on agent.<name> with off_allowlist', () => {
+    const tree = fixtureTree();
+    // Silent update (no insert flag) — the models.ts overwrite pattern D1 forbids.
+    const bare = rejected(tree, set(['agent', 'sdd-spec'], { prompt: 'x' }));
+    expect(bare.code).toBe('off_allowlist');
+    expect(bare.path).toBe('agent.sdd-spec');
+    // Never delete: remove is off the allowlist on the whole-entry row.
+    const rm = rejected(tree, del(['agent', 'sdd-spec']));
+    expect(rm.code).toBe('off_allowlist');
+    expect(rm.path).toBe('agent.sdd-spec');
+    expect(JSON.stringify(tree, null, 2)).toBe(RAW);
+  });
+
+  it('insert over an existing entry throws PatchError code "exists"', () => {
+    const err = rejected(
+      fixtureTree(),
+      ins(['agent', 'sdd-spec'], { prompt: 'x' }),
+    );
+    expect(err.code).toBe('exists');
+    expect(err.path).toBe('agent.sdd-spec');
+  });
+
+  it('isId backstops prototype-pollution names on the set-only row', () => {
+    const tree = fixtureTree();
+    for (const name of ['__proto__', 'constructor', 'prototype']) {
+      const err = rejected(tree, ins(['agent', name], { prompt: 'x' }));
+      expect(err.code, `name: ${name}`).toBe('off_allowlist');
+    }
+    expect(JSON.stringify(tree, null, 2)).toBe(RAW);
+  });
+});
+
 describe('patch — structural sharing (design: untouched subtrees keep same references)', () => {
   it('path-copies only the mutated chain and deep-clones inserted values', () => {
     const orig = fixtureTree();

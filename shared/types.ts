@@ -233,3 +233,48 @@ export interface CatalogResponse {
   models: Record<string, SnapshotModelEntry>;
   provenance?: Record<string, unknown>;
 }
+
+// --- orchestration-v2 WU-A: agent creation, templates, prompt resolve --------
+
+/**
+ * One bundled create preset (AT-1). `prompt` is always a non-empty INLINE
+ * string — presets never carry `{file:…}` refs or gentle-ai markers, so a
+ * created entry can't drift against sync-managed files (design D3).
+ */
+export interface AgentTemplate {
+  id: 'reviewer' | 'executor' | 'orchestrator' | 'blank';
+  label: string;
+  description: string;
+  prompt: string;
+}
+
+/** GET /api/templates response — exactly the 4 bundled presets (AT-1). */
+export interface TemplatesResponse {
+  templates: AgentTemplate[];
+}
+
+/**
+ * POST /api/agents body (AC-1): a create-only whole-entry write. `agent`
+ * carries only {model?, description?, prompt}; prompt is required, inline
+ * and ≤ 64 KiB (AC-4/AC-5). There is deliberately NO update route — the
+ * entry is set at creation and never rewritten through the API (OA-4).
+ */
+export interface CreateAgentRequest {
+  hash: string;
+  name: string;
+  agent: { model?: string; description?: string; prompt: string };
+}
+
+/**
+ * GET /api/agents/:name/prompt response (D4, AT-2): read-only materialization
+ * for clone/preview. Inline prompts pass through verbatim; `{file:…}` refs
+ * resolve inside the CONFIG directory only (realpath containment, 64 KiB
+ * cap, everything unresolvable fails closed as 404 prompt_unavailable).
+ */
+export interface AgentPromptResponse {
+  name: string;
+  source: 'inline' | 'file';
+  /** Present only for `source:'file'` — the config-dir-relative ref string. */
+  ref?: string;
+  prompt: string;
+}
