@@ -514,10 +514,23 @@ code {
 .orch-table td {
   border-bottom: 1px solid var(--line);
   font-size: 13px;
-  overflow-wrap: anywhere;
   padding: 8px 12px 8px 0;
   text-align: left;
   vertical-align: top;
+}
+
+/* Agent names must never break per character: `overflow-wrap: anywhere` on
+   the row header collapses the column's min-content to one glyph (the
+   "gent le-orch estr ator" bug). Hyphen-boundary wrapping is enough, and the
+   fixed width keeps the column stable while a prompt block is expanded. */
+.orch-table th[scope='row'] {
+  overflow-wrap: normal;
+  width: 200px;
+}
+
+/* Long model ids and prompt content still wrap freely inside their cells. */
+.orch-table td {
+  overflow-wrap: anywhere;
 }
 
 .orch-table thead th {
