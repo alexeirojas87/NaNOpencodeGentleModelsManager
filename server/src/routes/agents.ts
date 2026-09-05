@@ -16,11 +16,25 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { Hono } from 'hono';
 
 import type { AgentPromptResponse } from '../../../shared/types';
-import { load } from '../config/load';
+// agent-pipelines WU-1 task 1.2: the AC-2/AC-3/AC-5 gate constants relocated
+// to config/ownership.ts (behavior-neutral move — one shared gate authority;
+// the checks below keep their exact pinned order and messages).
+import {
+  findPipelineOwner,
+  isReserved,
+  MAX_PROMPT_BYTES,
+  NAME_RE,
+  NAME_UNSAFE,
+  REF_RE,
+  RESERVED_EXACT,
+  RESERVED_PREFIXES,
+} from '../config/ownership';
 import type { PatchOp } from '../config/patch';
+import { pipelineDefs } from '../pipelines';
 import {
   HttpError,
   isRecord,
+  modelIsInstalled,
   readJsonBody,
   recordField,
   requireAgent,
@@ -32,29 +46,8 @@ export const agentsRoute = new Hono();
 
 // --- POST /api/agents gate constants (design D2) ----------------------------
 
-/** Name charset gate (AC-2) — project convention; upstream has none [S1–S4]. */
-const NAME_RE = /^[\w.-]+$/;
-/** The regex alone permits these — they must never reach the patch layer. */
-const NAME_UNSAFE = new Set([
-  '.',
-  '..',
-  '__proto__',
-  'constructor',
-  'prototype',
-]);
-/**
- * gentle-ai sync silently deep-merges these (AC-3, C2.1/C2.4 [S5][S6];
- * re-verified against gentle-ai@main 71cf25f9 at pre-apply, task 1.0).
- * Case-sensitive by spec: `Explore` and bare `sdd` are legal user agents.
- */
-const RESERVED_PREFIXES = ['sdd-', 'jd-', 'review-'];
-const RESERVED_EXACT = new Set(['general', 'explore', 'gentle-orchestrator']);
 /** AC-4: the ONLY keys a create may carry (first offender is named). */
 const ENTRY_FIELDS = new Set(['model', 'description', 'prompt']);
-/** AC-5/AT-2: `{file:…}` reference form — never persisted, resolved read-only. */
-const REF_RE = /^\s*\{file:(.*)\}\s*$/;
-/** AC-5 64 KiB cap; AT-3 caps materialized file content at the same size. */
-const MAX_PROMPT_BYTES = 65536;
 
 agentsRoute.put('/agents/:name/model', async (c) => {
   try {
@@ -88,22 +81,8 @@ agentsRoute.put('/agents/:name/model', async (c) => {
   }
 });
 
-/** Gate 8 (AC-6): is `model` a `<provider>/<model-id>` pair in this CONFIG?
- * Matched against the constructed pair set — the OA-2 installedPairs rule,
- * server-side, so no provider/model id ambiguity from naive splitting. */
-async function modelIsInstalled(model: unknown): Promise<boolean> {
-  if (typeof model !== 'string') return false;
-  const providers = (await load()).tree.provider;
-  if (!isRecord(providers)) return false;
-  for (const [pid, entry] of Object.entries(providers)) {
-    const models =
-      isRecord(entry) && isRecord(entry['models']) ? entry['models'] : {};
-    for (const mid of Object.keys(models)) {
-      if (`${pid}/${mid}` === model) return true;
-    }
-  }
-  return false;
-}
+/** Gate 8 (AC-6) — modelIsInstalled relocated to routes/http.ts in WU-2a
+ * (shared with the pipeline endpoints); behavior-neutral for this route. */
 
 /**
  * POST /api/agents — whole-entry CREATE, set-only (SCW-7 row, design D2).
@@ -315,6 +294,141 @@ agentsRoute.get('/agents/:name/prompt', async (c) => {
       prompt: text,
     };
     return c.json(body);
+  } catch (err) {
+    return respondError(c, err);
+  }
+});
+
+// --- SCW-7' c: PUT /api/agents/:name/prompt (OA-4', AP-4 lockstep) ----------
+
+/**
+ * Prompt UPDATE for user-owned names (the entry itself stays create-once;
+ * only the prompt value moves). Gates: requireAgent 404 → reserved 400
+ * (managed prompts never writable) → AC-5 (non-empty inline string, ≤ 64 KiB,
+ * WHOLE-STRING `{file:}` rejection — mid-string stays inert text). A
+ * pipeline-owned ROLE answers with ONE runSave carrying both the row value-op
+ * and the def-map whole write with that roles[].prompt replaced — def/row
+ * match post-save (AP-4). The orchestrator prompt is generator-owned: writes
+ * on its name 400; the builder save regenerates it.
+ */
+agentsRoute.put('/agents/:name/prompt', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const name = c.req.param('name');
+    const loaded = await requireAgent(name);
+    if (isReserved(name)) {
+      throw new HttpError(
+        400,
+        'reserved_name',
+        `Agent "${name}" is owned by gentle-ai sync — its prompt is never writable through the dashboard (OA-4).`,
+      );
+    }
+    const prompt = body['prompt'];
+    if (prompt === undefined || prompt === '') {
+      throw new HttpError(
+        400,
+        'prompt_required',
+        '"prompt" must be a non-empty inline string.',
+      );
+    }
+    if (typeof prompt !== 'string') {
+      throw new HttpError(400, 'prompt_invalid', '"prompt" must be a string.');
+    }
+    if (REF_RE.test(prompt)) {
+      throw new HttpError(
+        400,
+        'file_ref_rejected',
+        'A {file:…} reference prompt is never persisted — inline the text.',
+      );
+    }
+    if (Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) {
+      throw new HttpError(
+        400,
+        'prompt_too_large',
+        `prompt is ${Buffer.byteLength(prompt, 'utf8')} bytes — the cap is 65536 (64 KiB).`,
+      );
+    }
+    const owner = findPipelineOwner(loaded.tree, name);
+    if (owner !== undefined && name === owner) {
+      throw new HttpError(
+        400,
+        'generator_owned',
+        `The orchestrator prompt of pipeline "${owner}" is generated from the role set — save the pipeline in the builder to regenerate it.`,
+      );
+    }
+    if (owner !== undefined) {
+      // AP-4 lockstep: row + definition in exactly one save (SCW-7' c).
+      const defs = pipelineDefs(loaded.tree);
+      const defRaw = defs[owner];
+      const roles =
+        isRecord(defRaw) && Array.isArray(defRaw['roles'])
+          ? (defRaw['roles'] as unknown[])
+          : [];
+      const rewritten = roles.map((role) =>
+        isRecord(role) && role['name'] === name
+          ? { ...role, prompt } // existing key → position-preserving update
+          : role,
+      );
+      const ops: PatchOp[] = [
+        { path: ['agent', name, 'prompt'], value: prompt },
+        {
+          path: ['agent-pipelines'],
+          value: {
+            ...defs,
+            [owner]: {
+              ...(isRecord(defRaw) ? defRaw : {}),
+              roles: rewritten,
+            },
+          },
+        },
+      ];
+      return await runSave(c, body, ops);
+    }
+    return await runSave(c, body, [
+      { path: ['agent', name, 'prompt'], value: prompt },
+    ]);
+  } catch (err) {
+    return respondError(c, err);
+  }
+});
+
+// --- SCW-7' d: DELETE /api/agents/:name (user-owned standalone only) --------
+
+/**
+ * Whole-entry DELETE confined to user-owned STANDALONE names: reserved names
+ * never delete (sync owns them), pipeline members never delete standalone —
+ * AP-5's pipeline delete removes def and rows together (definitions cannot
+ * bypass the gate; patch()'s accumulated-tree check is the backstop). One
+ * runSave, one remove op; SCW-4 backup inside; fresh hash echoed.
+ */
+agentsRoute.delete('/agents/:name', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const name = c.req.param('name');
+    const loaded = await requireAgent(name); // absent/typo → 404 first
+    if (!NAME_RE.test(name) || NAME_UNSAFE.has(name)) {
+      throw new HttpError(
+        400,
+        'name_invalid',
+        `"${name}" is not a deletable name — must match ${NAME_RE}.`,
+      );
+    }
+    if (isReserved(name)) {
+      throw new HttpError(
+        400,
+        'reserved_name',
+        `Agent "${name}" is owned by gentle-ai sync — it is never deletable through the dashboard.`,
+      );
+    }
+    const owner = findPipelineOwner(loaded.tree, name);
+    if (owner !== undefined) {
+      throw new HttpError(
+        400,
+        'pipeline_owned',
+        `Agent "${name}" is a member of pipeline "${owner}" — delete the pipeline instead (its rows are removed atomically with the definition).`,
+      );
+    }
+    return await runSave(c, body, [{ path: ['agent', name], remove: true }]);
   } catch (err) {
     return respondError(c, err);
   }

@@ -6,14 +6,18 @@
 // reads the Models view needs. DTOs are the shared contracts from
 // shared/types.ts, never redeclared here.
 import type {
+  AgentPipelinesResponse,
   AgentPromptResponse,
   CatalogResponse,
   ConfigResponse,
   CreateAgentRequest,
   ModelConfig,
+  PipelineSubmitRequest,
+  SetDefaultAgentRequest,
   StatusResponse,
   SyncResponse,
   TemplatesResponse,
+  UpdatePromptRequest,
   WriteResponse,
 } from '../../shared/types';
 
@@ -226,4 +230,89 @@ export function getAgentPrompt(name: string): Promise<AgentPromptResponse> {
     'GET',
     `/api/agents/${encodeURIComponent(name)}/prompt`,
   ) as Promise<AgentPromptResponse>;
+}
+
+// --- agent-pipelines (WU-3a task 3a.2): lifecycle + mutation clients ---------
+// All batch gates (dup, collision, reserved, AP-1 shape, AC-4' whitelist) run
+// server-side pre-disk; whatever a 400 names, the builder routes to the
+// offending field (AC-9'). The submit body is exactly {hash, pipeline} — the
+// generated trio never rides client input.
+
+/** Definition read surface (edit prefill, view grouping; #479 deviation 1). */
+export function getPipelines(): Promise<AgentPipelinesResponse> {
+  return request(
+    'GET',
+    '/api/agent-pipelines',
+  ) as Promise<AgentPipelinesResponse>;
+}
+
+/** POST /api/agent-pipelines — atomic create: def + N+1 rows, ONE save (AP-2). */
+export function createPipeline(
+  req: PipelineSubmitRequest,
+): Promise<WriteResponse> {
+  return request('POST', '/api/agent-pipelines', req) as Promise<WriteResponse>;
+}
+
+/** PUT /api/agent-pipelines/:name — edit rewrites def+rows in lockstep (AP-4). */
+export function updatePipeline(
+  name: string,
+  req: PipelineSubmitRequest,
+): Promise<WriteResponse> {
+  return request(
+    'PUT',
+    `/api/agent-pipelines/${encodeURIComponent(name)}`,
+    req,
+  ) as Promise<WriteResponse>;
+}
+
+/** DELETE /api/agent-pipelines/:name — def + rows together, zero orphans (AP-5). */
+export function deletePipeline(
+  name: string,
+  hash: string,
+): Promise<WriteResponse> {
+  return request('DELETE', `/api/agent-pipelines/${encodeURIComponent(name)}`, {
+    hash,
+  }) as Promise<WriteResponse>;
+}
+
+/**
+ * PUT /api/agents/:name/prompt (SCW-7' c, OA-4'): user-owned names only —
+ * a pipeline ROLE answers in lockstep (def + row match, one save, AP-4),
+ * the orchestrator name answers 400 generator-owned. The server re-checks
+ * AC-5 (anchored `{file:}`, 64 KiB); the editor keeps the form data on 409.
+ */
+export function updateAgentPrompt(
+  name: string,
+  req: UpdatePromptRequest,
+): Promise<WriteResponse> {
+  return request(
+    'PUT',
+    `/api/agents/${encodeURIComponent(name)}/prompt`,
+    req,
+  ) as Promise<WriteResponse>;
+}
+
+/** DELETE /api/agents/:name (SCW-7' d) — user-owned standalone only (AP-6). */
+export function deleteAgent(
+  name: string,
+  hash: string,
+): Promise<WriteResponse> {
+  return request('DELETE', `/api/agents/${encodeURIComponent(name)}`, {
+    hash,
+  }) as Promise<WriteResponse>;
+}
+
+/**
+ * PUT /api/config/default-agent (AP-7): gated to existing, visible,
+ * non-subagent primaries — the loader's throw set is the dashboard's gate;
+ * `agent: null` clears (the always-valid build-in fallback).
+ */
+export function setDefaultAgent(
+  req: SetDefaultAgentRequest,
+): Promise<WriteResponse> {
+  return request(
+    'PUT',
+    '/api/config/default-agent',
+    req,
+  ) as Promise<WriteResponse>;
 }

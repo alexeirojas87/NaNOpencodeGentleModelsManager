@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 
+import { agentPipelinesRoute } from './routes/agent-pipelines';
 import { agentsRoute } from './routes/agents';
 import { catalogRoute } from './routes/catalog';
 import { configRoute } from './routes/config';
@@ -31,6 +32,8 @@ app.route('/api', modelsRoute);
 app.route('/api', agentsRoute);
 // WU-A (orchestration-v2): bundled create presets + POST /api/agents in agents.
 app.route('/api', templatesRoute);
+// agent-pipelines WU-2a: atomic create/edit/delete lifecycle endpoints.
+app.route('/api', agentPipelinesRoute);
 app.route('/api', statusRoute);
 // WU9: gentle-ai sync pass-through (OA-3) — argv allowlist, execFile, reload.
 app.route('/api', syncRoute);

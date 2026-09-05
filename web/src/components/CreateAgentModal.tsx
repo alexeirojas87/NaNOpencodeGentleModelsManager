@@ -27,6 +27,7 @@ import {
 } from '../api';
 import { IconClose, IconPlus } from '../icons';
 import { ConflictModal, type ConflictInfo } from './ConflictModal';
+import { PipelineBuilderModal } from './PipelineBuilderModal';
 
 export interface CreateAgentModalProps {
   base: ConfigResponse;
@@ -67,6 +68,10 @@ export function CreateAgentModal({
   onCreated,
   onAdoptFresh,
 }: CreateAgentModalProps) {
+  // AC-9' (agent-pipelines WU-3a task 3a.4): the modal offers both shapes.
+  // SINGLE is the default — the whole pre-pipeline surface (D5 read-only
+  // preview, zero textareas, one presets fetch) renders unchanged beneath it.
+  const [mode, setMode] = useState<'single' | 'pipeline'>('single');
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [source, setSource] = useState('');
@@ -169,6 +174,20 @@ export function CreateAgentModal({
     }
   }
 
+  // AC-9': pipeline shape — the builder replaces this dialog body entirely
+  // (one dialog on screen; the builder's own toggle switches back).
+  if (mode === 'pipeline') {
+    return (
+      <PipelineBuilderModal
+        base={base}
+        onClose={onClose}
+        onSaved={onCreated}
+        onAdoptFresh={onAdoptFresh}
+        onSwitchToSingle={() => setMode('single')}
+      />
+    );
+  }
+
   return (
     <div className="overlay">
       <form
@@ -182,6 +201,27 @@ export function CreateAgentModal({
         }}
       >
         <h2>New agent</h2>
+        <div className="field" role="radiogroup" aria-label="Create as">
+          <label>
+            <input
+              type="radio"
+              name="create-mode"
+              value="single"
+              defaultChecked
+              readOnly
+            />
+            Single agent
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="create-mode"
+              value="pipeline"
+              onChange={() => setMode('pipeline')}
+            />
+            Pipeline
+          </label>
+        </div>
         <p className="modal-note">
           Prompts are fixed at creation and never rewritten here (OA-4): pick a
           template or clone an existing agent to set the preview below.

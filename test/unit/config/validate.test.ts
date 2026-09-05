@@ -97,3 +97,114 @@ describe('validate — readable per-path errors (SCW-3)', () => {
     }
   });
 });
+
+// --- agent-pipelines WU-1 task 1.3 (RED) — AP-1 strict definition schema ----
+// `agent-pipelines` joins the policed writable sections: unknown fields are
+// NAMED with their path (no-unrecognized-keys), `{file:` is an ANCHORED gate
+// (mid-string survives as inert text, OA-4'), and prompts cap at 64 KiB.
+// Other top-level keys stay permissive passthrough (C-R2 — proven by the
+// fixture-acceptance test above).
+describe('validate — agentPipelinesSchema AP-1 strict shape', () => {
+  const role = {
+    name: 'mypl-build',
+    description: 'Build it',
+    promptSource: 'template',
+    prompt: 'Do the build task.',
+  };
+  const def = {
+    roles: [role],
+    orchestrator: { description: 'coordinate mypl' },
+  };
+  const withPipelines = (pipelines: unknown): ConfigTree => ({
+    provider: {},
+    'agent-pipelines': pipelines as ConfigTree['agent-pipelines'],
+  });
+
+  it('accepts a valid definition, incl. optional model/helpers', () => {
+    expect(validate(withPipelines({ mypl: def }))).toEqual([]);
+    expect(
+      validate(
+        withPipelines({
+          mypl: {
+            roles: [{ ...role, model: 'nan/glm5.3-flash' }],
+            orchestrator: { model: 'nan/qwen3.8-flash', description: 'd' },
+            helpers: ['general'],
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('names the path of an unknown field (no-unrecognized-keys)', () => {
+    const issues = validate(
+      withPipelines({ mypl: { ...def, temperature: 0.2 } }),
+    );
+    expect(issues.some((i) => i.path.includes('agent-pipelines.mypl'))).toBe(
+      true,
+    );
+    expect(issues.some((i) => i.message.includes('temperature'))).toBe(true);
+
+    const roleIssues = validate(
+      withPipelines({
+        mypl: { ...def, roles: [{ ...role, mode: 'subagent' }] },
+      }),
+    );
+    expect(
+      roleIssues.some(
+        (i) => i.path.includes('roles.0') && i.message.includes('mode'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects whole-string {file:} prompts but keeps mid-string {file: text (anchored)', () => {
+    const ref = validate(
+      withPipelines({
+        mypl: { ...def, roles: [{ ...role, prompt: '{file:./x.md}' }] },
+      }),
+    );
+    expect(ref.length).toBeGreaterThan(0);
+    expect(ref[0]?.path).toContain('agent-pipelines.mypl.roles.0.prompt');
+
+    const mid = validate(
+      withPipelines({
+        mypl: {
+          ...def,
+          roles: [{ ...role, prompt: 'context {file:x} stays inert text' }],
+        },
+      }),
+    );
+    expect(mid).toEqual([]);
+  });
+
+  it('rejects >64 KiB prompts and empty prompts; bad enum promptSource named', () => {
+    const big = validate(
+      withPipelines({
+        mypl: { ...def, roles: [{ ...role, prompt: 'x'.repeat(65 * 1024) }] },
+      }),
+    );
+    expect(big.length).toBeGreaterThan(0);
+    const empty = validate(
+      withPipelines({ mypl: { ...def, roles: [{ ...role, prompt: '' }] } }),
+    );
+    expect(empty.length).toBeGreaterThan(0);
+    const src = validate(
+      withPipelines({
+        mypl: { ...def, roles: [{ ...role, promptSource: 'paste' }] },
+      }),
+    );
+    expect(src.some((i) => i.path.includes('roles.0.promptSource'))).toBe(true);
+  });
+
+  it('rejects hostile pipeline keys and helper glob metas (task-map keys)', () => {
+    for (const key of ['bad name', '*', '..']) {
+      expect(
+        validate(withPipelines({ [key]: def })).length,
+        `key: ${key}`,
+      ).toBeGreaterThan(0);
+    }
+    const helper = validate(
+      withPipelines({ mypl: { ...def, helpers: ['*'] } }),
+    );
+    expect(helper.length).toBeGreaterThan(0);
+  });
+});

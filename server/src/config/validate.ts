@@ -9,7 +9,10 @@
 //
 // Output is a list of readable per-path issues; an empty list means valid.
 // Callers (WU4 save, WU5 routes) map a non-empty list to HTTP 400 pre-backup.
+import { z } from 'zod';
+
 import { configSchema } from '../../../shared/schema.generated';
+import { MAX_PROMPT_BYTES, NAME_RE, NAME_UNSAFE, REF_RE } from './ownership';
 
 export interface ValidationIssue {
   /** Dot path to the offending key, e.g. provider.nan.models.x.contextWindow. */
@@ -50,12 +53,86 @@ function contextWindowIssues(tree: unknown): ValidationIssue[] {
 }
 
 /**
+ * AP-1 (agent-pipelines): the definition map is DASHBOARD-OWNED, so unlike the
+ * passthrough sections it is policed by a STRICT zod schema — no-unrecognized-
+ * keys at every level, anchored whole-string `{file:` rejection (mid-string is
+ * inert text, OA-4'), non-empty prompts ≤ 64 KiB, AC-2 charset pipeline keys,
+ * and helper names that can never smuggle glob metas (`*`/`?` would widen the
+ * generated permission.task beyond its exact-name allow contract).
+ */
+const promptSchema = z
+  .string()
+  .min(1)
+  .refine((p) => !REF_RE.test(p), {
+    message: 'a {file:…} reference prompt is never persisted — inline the text',
+  })
+  .refine((p) => Buffer.byteLength(p, 'utf8') <= MAX_PROMPT_BYTES, {
+    message: `prompt exceeds the ${MAX_PROMPT_BYTES} byte (64 KiB) cap`,
+  });
+
+const pipelineKeySchema = z
+  .string()
+  .refine((k) => NAME_RE.test(k) && !NAME_UNSAFE.has(k), {
+    message:
+      'pipeline/role/helper names must match ^[\\w.-]+$ and not be . / .. / __proto__ / constructor / prototype',
+  });
+
+const agentPipelinesSchema = z.record(
+  pipelineKeySchema,
+  z.strictObject({
+    roles: z.array(
+      z.strictObject({
+        name: pipelineKeySchema,
+        model: z.string().optional(),
+        description: z.string(),
+        promptSource: z.enum(['template', 'clone', 'free-text']),
+        prompt: promptSchema,
+      }),
+    ),
+    orchestrator: z.strictObject({
+      model: z.string().optional(),
+      description: z.string(),
+    }),
+    helpers: z.array(pipelineKeySchema).optional(),
+  }),
+);
+
+/** Issues for one submitted definition map, standalone (route pre-disk gate
+ * per AP-1 — same authority as save-time section validation, zero duplication;
+ * pass `{ [key]: def }`). */
+export function pipelineSectionIssuesOf(section: unknown): ValidationIssue[] {
+  const parsed = agentPipelinesSchema.safeParse(section);
+  if (parsed.success) return [];
+  return parsed.error.issues.map((issue) => ({
+    path: `agent-pipelines${issue.path.length > 0 ? `.${issue.path.map(String).join('.')}` : ''}`,
+    message: issue.message,
+  }));
+}
+
+/** Issues for the dashboard-owned definition map (strict, per AP-1). */
+function pipelineSectionIssues(
+  tree: Record<string, unknown>,
+): ValidationIssue[] {
+  const section = tree['agent-pipelines'];
+  if (section === undefined) return [];
+  return pipelineSectionIssuesOf(section);
+}
+
+/**
  * Sections the Allowlist can write to. Only these are policed: everything
  * else in CONFIG is externally owned, survives every write untouched (SCW-7)
  * and pre-existing drift there must never block an allowlisted save — the
  * dashboard validates what it changes and repairs nothing (PC-1 spirit).
+ * `agent-pipelines` is policed by the STRICT agentPipelinesSchema above (its
+ * projection through the permissive generated schema below is a no-op —
+ * dashboard content must reject unknown keys, externally owned content may not).
  */
-const WRITABLE_SECTIONS = ['provider', 'agent', 'default_agent'] as const;
+const WRITABLE_SECTIONS = [
+  'provider',
+  'agent',
+  'default_agent',
+  'agent-pipelines',
+] as const;
 
 /** Validate a CONFIG tree: writable sections against schema + domain addendum. */
 export function validate(tree: unknown): ValidationIssue[] {
@@ -82,5 +159,6 @@ export function validate(tree: unknown): ValidationIssue[] {
     }
   }
 
+  issues.push(...pipelineSectionIssues(tree));
   return issues.concat(contextWindowIssues(tree));
 }

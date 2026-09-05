@@ -19,8 +19,18 @@ import type {
   AgentConfigEntry,
   ConfigResponse,
   MaskedProvider,
+  PipelineDefinition,
 } from '../../../shared/types';
-import { ApiError, getConfig, putAgentModel } from '../api';
+import {
+  ApiError,
+  deleteAgent,
+  deletePipeline,
+  getConfig,
+  getPipelines,
+  putAgentModel,
+  setDefaultAgent,
+} from '../api';
+import { isUserOwned } from '../client-ownership';
 import { IconFileText, IconList, IconPlus } from '../icons';
 import {
   ConflictModal,
@@ -28,6 +38,8 @@ import {
   type ConflictRow,
 } from '../components/ConflictModal';
 import { CreateAgentModal } from '../components/CreateAgentModal';
+import { PipelineBuilderModal } from '../components/PipelineBuilderModal';
+import { PromptEditorModal } from '../components/PromptEditorModal';
 import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
@@ -222,17 +234,21 @@ function ModelPicker({
   value,
   pairs,
   onChange,
+  disabled = false,
 }: {
   agentName: string;
   value: string;
   pairs: string[];
   onChange: (value: string) => void;
+  /** AP-4: pipeline members are edited in the builder — cells disabled. */
+  disabled?: boolean;
 }) {
   const ghost = value !== '' && !pairs.includes(value);
   return (
     <select
       aria-label={`${agentName} model`}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
     >
       <option value="">runtime default</option>
@@ -258,21 +274,34 @@ function PromptCell({
   agentName,
   entry,
   onRead,
+  onEdit,
+  deletable,
+  onDelete,
 }: {
   agentName: string;
   entry: AgentConfigEntry;
   onRead: (name: string) => void;
+  /** OA-4': user-owned names also get the editor (undefined ⇒ never). */
+  onEdit?: (name: string) => void;
+  /** SCW-7' d / AP-6: danger delete only on user-owned standalone rows. */
+  deletable?: boolean;
+  onDelete?: (name: string) => void;
 }) {
   const hasPrompt = typeof entry.prompt === 'string' && entry.prompt.length > 0;
   const markers = Object.keys(entry).filter((key) =>
     key.startsWith('gentle-ai:'),
   );
-  if (!hasPrompt && markers.length === 0) return null;
+  if (!hasPrompt && markers.length === 0 && !deletable) return null;
   return (
     <div className="ro-extras">
       {hasPrompt && (
         <button type="button" className="btn" onClick={() => onRead(agentName)}>
           <IconFileText /> view prompt
+        </button>
+      )}
+      {hasPrompt && onEdit && (
+        <button type="button" className="btn" onClick={() => onEdit(agentName)}>
+          <IconFileText /> edit prompt
         </button>
       )}
       {markers.map((key) => (
@@ -281,6 +310,15 @@ function PromptCell({
           <span className="ro-flag">read-only</span>
         </span>
       ))}
+      {deletable && onDelete && (
+        <button
+          type="button"
+          className="btn"
+          onClick={() => onDelete(agentName)}
+        >
+          delete
+        </button>
+      )}
     </div>
   );
 }
@@ -297,6 +335,15 @@ export default function OrchestrationView() {
   // orchestration-v2 WU-B: the two read/write surfaces this view hosts.
   const [createOpen, setCreateOpen] = useState(false);
   const [reader, setReader] = useState<string | null>(null);
+  // agent-pipelines WU-4: definitions (grouping/badge truth), the builder in
+  // edit mode, the two delete confirms and the user-owned prompt editor.
+  const [defs, setDefs] = useState<Record<string, PipelineDefinition>>({});
+  const [builder, setBuilder] = useState<{ name: string } | null>(null);
+  const [pipelineConfirm, setPipelineConfirm] = useState<string | null>(null);
+  const [agentConfirm, setAgentConfirm] = useState<string | null>(null);
+  const [promptEdit, setPromptEdit] = useState<string | null>(null);
+  const [defaultBusy, setDefaultBusy] = useState(false);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -308,9 +355,21 @@ export default function OrchestrationView() {
     }
   }, []);
 
+  // The definitions lane is a parallel read (GET /api/agent-pipelines — the
+  // read surface of apply-progress 479-deviation-1). A failure (or a server
+  // predating the route) degrades to "no pipelines", never blocks the view.
+  const refreshDefs = useCallback(async () => {
+    try {
+      setDefs((await getPipelines()).pipelines ?? {});
+    } catch {
+      setDefs({});
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
-  }, [reload]);
+    void refreshDefs();
+  }, [reload, refreshDefs]);
 
   function setModel(name: string, value: string) {
     setEdits((prev) => ({ ...prev, [name]: value === '' ? null : value }));
@@ -348,12 +407,14 @@ export default function OrchestrationView() {
     return <p className="muted">Loading configuration…</p>;
   }
 
-  // Shared create-success handling: close, re-read CONFIG (AC-9) and raise
-  // the CX-3 restart notice. The generic derivation places the new agent.
+  // Shared create-success handling: close, re-read CONFIG + definitions
+  // (AC-9) and raise the CX-3 restart notice. The generic derivation places
+  // the new agent; a pipeline create additionally gains its group.
   const agentCreated = () => {
     setCreateOpen(false);
     setRestartRequired(true);
     void reload();
+    void refreshDefs();
   };
   const createModal = createOpen && (
     <CreateAgentModal
@@ -364,8 +425,8 @@ export default function OrchestrationView() {
     />
   );
 
-  const agentNames = Object.keys(base.agents);
-  if (agentNames.length === 0) {
+  const allAgentNames = Object.keys(base.agents);
+  if (allAgentNames.length === 0) {
     return (
       <div className="panel">
         <div className="card-header">
@@ -393,10 +454,99 @@ export default function OrchestrationView() {
     );
   }
 
+  // AP-9 grouping truth comes from the definitions (tolerant read — rows
+  // exist even when a def carries an externally-authored shape).
+  const defEntries = Object.entries(defs);
+  /** Member row names per definition: orchestrator (≡ key) + roles (AP-6). */
+  const membersOf = (def: PipelineDefinition): string[] => [
+    ...(def && Array.isArray(def.roles) ? def.roles.map((r) => r.name) : []),
+  ];
+  const pipelineMembers = new Set<string>([
+    ...defEntries.flatMap(([key, def]) => [key, ...membersOf(def)]),
+  ]);
+  /** Rows a pipeline delete will remove: orchestrator first, then roles. */
+  const memberListFor = (key: string): string[] => {
+    const def = defs[key];
+    return def ? [key, ...membersOf(def)] : [key];
+  };
+
+  // The matrix/list render the NON-member agents only; groupAgents and
+  // splitVariant stay untouched (the AP-9 pattern: a pre-filter, never a fork).
+  const agentNames = allAgentNames.filter((name) => !pipelineMembers.has(name));
   const { rows, others } = groupAgents(agentNames);
   const pairs = installedPairs(base.providers);
   const changeCount = Object.keys(pendingWrites(base, edits)).length;
   const conflictTarget = conflict?.fresh ?? base;
+  // AP-7 picker surface: visible primaries only — mirrors the loader's throw
+  // set client-side (mode subagent / hidden; C-R1d); the server re-gates.
+  const visiblePrimaries = allAgentNames.filter((name) => {
+    const entry = base.agents[name];
+    return entry.mode !== 'subagent' && entry.hidden !== true;
+  });
+
+  /** AP-7: action select — the placeholder never binds a pending state. */
+  const applyDefaultAgent = async (value: string) => {
+    if (value === '') return;
+    setDefaultBusy(true);
+    setDefaultError(null);
+    try {
+      const res = await setDefaultAgent({
+        hash: base.hash,
+        agent: value === '__clear__' ? null : value,
+      });
+      setBase((prev) =>
+        prev
+          ? {
+              ...prev,
+              hash: res.hash,
+              defaultAgent: value === '__clear__' ? undefined : value,
+            }
+          : prev,
+      );
+      setRestartRequired(true); // CX-3: selection is loader-time state
+    } catch (err) {
+      setDefaultError(
+        err instanceof ApiError
+          ? err.message
+          : 'The default-agent update failed unexpectedly.',
+      );
+    } finally {
+      setDefaultBusy(false);
+    }
+  };
+
+  const confirmPipelineDelete = async (key: string) => {
+    setPipelineConfirm(null);
+    try {
+      const res = await deletePipeline(key, base.hash);
+      setBase((prev) => (prev ? { ...prev, hash: res.hash } : prev));
+      setRestartRequired(true);
+      void reload();
+      void refreshDefs();
+    } catch (err) {
+      setValidationError(
+        err instanceof ApiError
+          ? err.message
+          : 'The pipeline delete request failed unexpectedly.',
+      );
+    }
+  };
+
+  const confirmAgentDelete = async (name: string) => {
+    setAgentConfirm(null);
+    try {
+      const res = await deleteAgent(name, base.hash);
+      setBase((prev) => (prev ? { ...prev, hash: res.hash } : prev));
+      setRestartRequired(true);
+      void reload();
+    } catch (err) {
+      setValidationError(
+        err instanceof ApiError
+          ? err.message
+          : 'The agent delete request failed unexpectedly.',
+      );
+    }
+  };
 
   const pickerNode = (agentName: string) => {
     // An explicit clear is edits[name] === null — existence, not ??, marks
@@ -444,6 +594,31 @@ export default function OrchestrationView() {
         >
           <IconPlus /> Create agent
         </button>
+        {/* AP-7 picker surface: offers ONLY visible primaries (+ clear).
+            Action select — it returns to the placeholder after each apply. */}
+        <div className="field">
+          <label htmlFor="default-agent-select">Default agent</label>
+          <select
+            id="default-agent-select"
+            aria-label="Default agent"
+            value=""
+            disabled={defaultBusy}
+            onChange={(e) => void applyDefaultAgent(e.target.value)}
+          >
+            <option value="">set default agent…</option>
+            <option value="__clear__">(no default — build-in fallback)</option>
+            {visiblePrimaries.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {defaultError && (
+            <p className="field-error" role="alert">
+              {defaultError}
+            </p>
+          )}
+        </div>
       </header>
 
       {restartRequired && (
@@ -506,6 +681,11 @@ export default function OrchestrationView() {
                             agentName={name}
                             entry={base.agents[name]}
                             onRead={setReader}
+                            onEdit={
+                              isUserOwned(name) ? setPromptEdit : undefined
+                            }
+                            deletable={isUserOwned(name)}
+                            onDelete={setAgentConfirm}
                           />
                         </>
                       ) : (
@@ -519,6 +699,88 @@ export default function OrchestrationView() {
           </tbody>
         </table>
       </section>
+
+      {/* agent-pipelines AP-9: members grouped under their definition key.
+          Generic edit cells are DISABLED (AP-4 — the builder is the edit
+          path); the badge marks pipeline membership (AP-6). */}
+      {defEntries.length > 0 && (
+        <section className="orch-section">
+          <h3>Pipelines</h3>
+          {defEntries.map(([key, def]) => {
+            const memberRows = [key, ...membersOf(def)];
+            return (
+              <div key={key} className="panel">
+                <div className="card-header">
+                  <h4 className="mono">{key}</h4>
+                  <span>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setBuilder({ name: key })}
+                    >
+                      Edit pipeline {key}
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setPipelineConfirm(key)}
+                    >
+                      Delete pipeline {key}
+                    </button>
+                  </span>
+                </div>
+                <table className="orch-table" aria-label={`Pipeline ${key}`}>
+                  <thead>
+                    <tr>
+                      <th>Member</th>
+                      <th>Model</th>
+                      <th>Prompt / markers</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {memberRows.map((name) => (
+                      <tr key={name} aria-label={name}>
+                        <th className="mono" scope="row">
+                          {name}
+                        </th>
+                        <td>
+                          <ModelPicker
+                            agentName={name}
+                            value={declaredModel(base.agents[name]) ?? ''}
+                            pairs={pairs}
+                            onChange={() => undefined}
+                            disabled
+                          />
+                          <div className="ro-extras">
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => setBuilder({ name: key })}
+                            >
+                              edit in builder
+                            </button>{' '}
+                            <span className="ro-flag">
+                              generic edits rejected — pipeline-owned (AP-4)
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <PromptCell
+                            agentName={name}
+                            entry={base.agents[name] ?? {}}
+                            onRead={setReader}
+                          />
+                          <span className="badge">pipeline {key}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       <section className="orch-section">
         <h3>Other agents</h3>
@@ -542,6 +804,9 @@ export default function OrchestrationView() {
                     agentName={name}
                     entry={base.agents[name]}
                     onRead={setReader}
+                    onEdit={isUserOwned(name) ? setPromptEdit : undefined}
+                    deletable={isUserOwned(name)}
+                    onDelete={setAgentConfirm}
                   />
                 </td>
               </tr>
@@ -593,6 +858,123 @@ export default function OrchestrationView() {
       {createModal}
       {reader && (
         <PromptReaderModal agentName={reader} onClose={() => setReader(null)} />
+      )}
+
+      {/* WU-3b edit path: the builder prefilled from the stored definition. */}
+      {builder && defs[builder.name] && (
+        <PipelineBuilderModal
+          key={builder.name}
+          base={base}
+          editing={{ name: builder.name, definition: defs[builder.name] }}
+          onClose={() => setBuilder(null)}
+          onSaved={(freshHash) => {
+            setBuilder(null);
+            setBase((prev) => (prev ? { ...prev, hash: freshHash } : prev));
+            setRestartRequired(true);
+            void reload();
+            void refreshDefs();
+          }}
+          onAdoptFresh={(fresh) => setBase(fresh)}
+        />
+      )}
+
+      {/* WU-4 OA-4': user-owned prompt editor (roles ride the lockstep route). */}
+      {promptEdit && (
+        <PromptEditorModal
+          key={promptEdit}
+          agentName={promptEdit}
+          hash={base.hash}
+          onClose={() => setPromptEdit(null)}
+          onSaved={(freshHash) => {
+            setPromptEdit(null);
+            setBase((prev) => (prev ? { ...prev, hash: freshHash } : prev));
+            setRestartRequired(true);
+            void reload();
+            // A role edit rewrote the def in lockstep (AP-4) — re-read it.
+            void refreshDefs();
+          }}
+          onAdoptFresh={(freshHash) =>
+            setBase((prev) => (prev ? { ...prev, hash: freshHash } : prev))
+          }
+        />
+      )}
+
+      {/* AP-5: pipeline delete confirm lists every affected row (N+1). */}
+      {pipelineConfirm && (
+        <div
+          className="overlay"
+          role="alertdialog"
+          aria-label={`Delete pipeline ${pipelineConfirm}?`}
+          aria-modal="true"
+        >
+          <div className="modal">
+            <h2>Delete pipeline {pipelineConfirm}?</h2>
+            <p className="modal-note">
+              This removes the definition and{' '}
+              {memberListFor(pipelineConfirm).length} rows in one save (AP-5,
+              SCW-4 backup first) — zero orphans:
+            </p>
+            <ul>
+              {memberListFor(pipelineConfirm).map((name, i) => (
+                <li key={name} className="mono">
+                  {i === 0 ? `${name} (orchestrator)` : name}
+                </li>
+              ))}
+            </ul>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmPipelineDelete(pipelineConfirm)}
+              >
+                Confirm delete
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setPipelineConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCW-7' d: standalone user-owned delete confirm (MC-4 pattern). */}
+      {agentConfirm && (
+        <div
+          className="overlay"
+          role="alertdialog"
+          aria-label={`Delete ${agentConfirm}?`}
+          aria-modal="true"
+        >
+          <div className="modal">
+            <h2>Delete {agentConfirm}?</h2>
+            <p className="modal-note">
+              This removes only the{' '}
+              <code className="mono">agent.{agentConfirm}</code> entry — a
+              backup is written before the delete (SCW-4). Cancel sends no
+              request.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmAgentDelete(agentConfirm)}
+              >
+                Confirm delete
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setAgentConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

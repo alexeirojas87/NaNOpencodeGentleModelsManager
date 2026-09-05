@@ -207,6 +207,17 @@ function scriptApi(
     prompts?: { status: number; body: unknown }[];
     /** WU-B — POST /api/agents queue (fails loud when exhausted). */
     creates?: { status: number; body: unknown }[];
+    /** agent-pipelines WU-4 — GET /api/agent-pipelines (sticky last).
+     * Raw response bodies (or {status,body} envelopes) both accepted. */
+    pipelines?: unknown[];
+    /** agent-pipelines WU-4 — POST/PUT /api/agent-pipelines[/name] queue. */
+    pipelineWrites?: { status: number; body: unknown }[];
+    /** agent-pipelines WU-4 — DELETE /api/agent-pipelines/name queue. */
+    pipelineDeletes?: { status: number; body: unknown }[];
+    /** agent-pipelines WU-4 — DELETE /api/agents/name queue. */
+    agentDeletes?: { status: number; body: unknown }[];
+    /** agent-pipelines WU-4 — PUT /api/config/default-agent queue. */
+    defaults?: { status: number; body: unknown }[];
   } = {},
 ) {
   const calls: Call[] = [];
@@ -216,6 +227,11 @@ function scriptApi(
   const templates = [...(opts.templates ?? [TEMPLATES_REPLY])];
   const prompts = [...(opts.prompts ?? [])];
   const creates = [...(opts.creates ?? [])];
+  const pipelines = [...(opts.pipelines ?? [{ pipelines: {} }])];
+  const pipelineWrites = [...(opts.pipelineWrites ?? [])];
+  const pipelineDeletes = [...(opts.pipelineDeletes ?? [])];
+  const agentDeletes = [...(opts.agentDeletes ?? [])];
+  const defaults = [...(opts.defaults ?? [])];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -257,6 +273,36 @@ function scriptApi(
       if (method === 'POST' && url === '/api/agents') {
         const reply = creates.shift();
         if (!reply) throw new Error('POST /api/agents script exhausted');
+        return json(reply.status, reply.body);
+      }
+      // --- agent-pipelines WU-4 lanes -------------------------------------
+      if (method === 'GET' && url === '/api/agent-pipelines') {
+        const next = pipelines.length > 1 ? pipelines.shift() : pipelines[0];
+        const env = next as { status?: number; body?: unknown };
+        const payload = env && 'body' in env ? env.body : next; // raw or envelope shape
+        return json(200, payload);
+      }
+      if (
+        (method === 'POST' && url === '/api/agent-pipelines') ||
+        (method === 'PUT' && /^\/api\/agent-pipelines\//.test(url))
+      ) {
+        const reply = pipelineWrites.shift();
+        if (!reply) throw new Error(`${method} ${url} script exhausted`);
+        return json(reply.status, reply.body);
+      }
+      if (method === 'DELETE' && /^\/api\/agent-pipelines\//.test(url)) {
+        const reply = pipelineDeletes.shift();
+        if (!reply) throw new Error(`${method} ${url} script exhausted`);
+        return json(reply.status, reply.body);
+      }
+      if (method === 'DELETE' && /^\/api\/agents\//.test(url)) {
+        const reply = agentDeletes.shift();
+        if (!reply) throw new Error(`${method} ${url} script exhausted`);
+        return json(reply.status, reply.body);
+      }
+      if (method === 'PUT' && url === '/api/config/default-agent') {
+        const reply = defaults.shift();
+        if (!reply) throw new Error('PUT default-agent script exhausted');
         return json(reply.status, reply.body);
       }
       return json(404, {
@@ -487,7 +533,12 @@ describe('Orchestration — prompts open a reader modal, cells stay picker-only 
     expect(screen.queryAllByRole('textbox').length).toBe(0);
     expect(document.querySelectorAll('textarea').length).toBe(0);
     for (const p of screen.getAllByRole('combobox')) {
-      expect(String(p.getAttribute('aria-label'))).toMatch(/ model$/);
+      // WU-4 adds exactly one non-model combobox: the header AP-7 default
+      // agent picker (aria-label 'Default agent'). Tables stay picker-only —
+      // the original intent of this sweep is unchanged.
+      expect(String(p.getAttribute('aria-label'))).toMatch(
+        / model$|^Default agent$/,
+      );
     }
     // "view prompt" opens the read-only reader with the FULL content.
     const exploreRow = within(otherTable()).getByRole('row', {
@@ -875,8 +926,12 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
     expect(await screen.findByText('exit 0')).toBeTruthy();
 
     // The panel's success path asked the parent to refresh, and the parent
-    // re-read CONFIG: GET /api/config ran exactly twice.
-    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2);
+    // re-read CONFIG: GET /api/config ran exactly twice. (WU-4: the count is
+    // scoped to /api/config — the definitions lane polls in parallel and is
+    // not a CONFIG reload; the proven semantics are unchanged.)
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(2);
     await waitFor(() =>
       expect(
         within(otherTable()).getByRole('row', { name: 'post-sync-agent' }),
@@ -900,8 +955,11 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
     expect(await screen.findByText('exit 2')).toBeTruthy();
     expect(screen.getByText(/sync aborted/)).toBeTruthy();
     expect(screen.queryByText(/Sync succeeded/)).toBeNull();
-    // Still the single initial GET — nothing re-baselined on failure.
-    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1);
+    // Still the single initial CONFIG read — nothing re-baselined on failure
+    // (definitions-lane GET scoped out — same semantics as above).
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(1);
   });
 
   it('a successful sync clears the OA-3 "run gentle-ai sync" advisory it answers', async () => {
@@ -926,7 +984,431 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
         screen.queryByText('run gentle-ai sync to refresh prompt table'),
       ).toBeNull(),
     );
-    // And the list refresh re-anchored the view on the fresh CONFIG (2 GETs).
-    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2);
+    // And the list refresh re-anchored the view on the fresh CONFIG (2 CONFIG GETs).
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(2);
+  });
+});
+
+// ===================== agent-pipelines WU-4 (task 4.1 — RED) ================
+// Grouping + badges + disabled member cells + delete confirms + user-owned
+// danger buttons + default-agent picker surface (AP-9, AP-4, AP-6, AP-7).
+import type { PipelineDefinition } from '../../../shared/types';
+import {
+  RESERVED_EXACT as CLIENT_EXACT,
+  RESERVED_PREFIXES as CLIENT_PREFIXES,
+} from '../client-ownership';
+import {
+  RESERVED_EXACT,
+  RESERVED_PREFIXES,
+} from '../../../server/src/config/ownership';
+
+/** One pipeline over the sampleAgents base: mypl + 2 roles (AP-1 def). */
+function pipelineAgents() {
+  return sampleAgents({
+    mypl: {
+      mode: 'primary',
+      description: 'coordinate mypl',
+      prompt: 'You are `mypl`, the "mypl" pipeline coordinator.\nDelegate…',
+    },
+    'mypl-build': {
+      mode: 'subagent',
+      hidden: true,
+      description: 'builds',
+      prompt: 'Build prompt.',
+    },
+    'mypl-review': {
+      mode: 'subagent',
+      hidden: true,
+      description: 'reviews',
+      prompt: 'Review prompt.',
+    },
+    'my-helper': { description: 'standalone', prompt: 'Helper prompt.' },
+  });
+}
+
+const PIPELINE_DEFS: { pipelines: Record<string, PipelineDefinition> } = {
+  pipelines: {
+    mypl: {
+      roles: [
+        {
+          name: 'mypl-build',
+          description: 'builds',
+          promptSource: 'template',
+          prompt: 'Build prompt.',
+        },
+        {
+          name: 'mypl-review',
+          description: 'reviews',
+          promptSource: 'template',
+          prompt: 'Review prompt.',
+        },
+      ],
+      orchestrator: { description: 'coordinate mypl' },
+    },
+  },
+};
+
+function pipelineTable(): HTMLElement {
+  return screen.getByRole('table', { name: 'Pipeline mypl' });
+}
+
+async function renderedPipelines() {
+  render(<OrchestrationView />);
+  await screen.findByRole('table', { name: 'Pipeline mypl' });
+}
+
+describe('Orchestration — pipeline groups with badges (AP-9)', () => {
+  it('members render grouped under the pipeline, never in the flat list', async () => {
+    scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+    });
+    await renderedPipelines();
+    const group = within(pipelineTable());
+    for (const name of ['mypl', 'mypl-build', 'mypl-review']) {
+      const row = group.getByRole('row', { name });
+      // Badge grouping per member row (orchestrator included).
+      expect(within(row).getByText('pipeline mypl')).toBeTruthy();
+    }
+    // The flat list holds the standalone user-owned helper — never members.
+    const others = within(otherTable());
+    expect(others.getByRole('row', { name: 'my-helper' })).toBeTruthy();
+    for (const member of ['mypl', 'mypl-build', 'mypl-review']) {
+      expect(others.queryByRole('row', { name: member })).toBeNull();
+    }
+    // Phase matrix untouched (AP-9 pattern: groupAgents/splitVariant intact).
+    expect(within(matrixTable()).getAllByRole('combobox').length).toBe(30);
+  });
+
+  it("member model cells are DISABLED with a builder pointer (AP-4: 'builder is the edit path)", async () => {
+    scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+    });
+    await renderedPipelines();
+    const buildRow = within(pipelineTable()).getByRole('row', {
+      name: 'mypl-build',
+    });
+    const memberPicker = picker('mypl-build');
+    expect(memberPicker.disabled).toBe(true);
+    expect(selectedText(memberPicker)).toBeTruthy();
+    expect(
+      within(buildRow).getByRole('button', { name: 'edit in builder' }),
+    ).toBeTruthy();
+    // The pointer opens the builder PREFILLED from the definition (3b path).
+    fireEvent.click(
+      within(buildRow).getByRole('button', { name: 'edit in builder' }),
+    );
+    const dlg = await screen.findByRole('dialog', { name: 'Pipeline builder' });
+    expect(
+      (within(dlg).getByLabelText('Pipeline name') as HTMLInputElement).value,
+    ).toBe('mypl');
+    expect(
+      (within(dlg).getByLabelText('Pipeline name') as HTMLInputElement)
+        .disabled,
+    ).toBe(true);
+    expect(within(dlg).getByText('Edit pipeline mypl')).toBeTruthy();
+  });
+
+  it('the pipeline delete confirm lists orchestrator + role names (N+1 rows)', async () => {
+    const { calls } = scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+    });
+    await renderedPipelines();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete pipeline mypl' }),
+    );
+    const confirm = await screen.findByRole('alertdialog', {
+      name: 'Delete pipeline mypl?',
+    });
+    // Every affected row named (AP-5 surface): orchestrator + both roles.
+    expect(within(confirm).getByText('mypl (orchestrator)')).toBeTruthy();
+    expect(within(confirm).getByText(/^mypl-build/)).toBeTruthy();
+    expect(within(confirm).getByText(/^mypl-review/)).toBeTruthy();
+    expect(within(confirm).getByText(/3 rows/)).toBeTruthy();
+    // Cancel sends NO request (MC-4 convention).
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(calls.filter((c) => c.method === 'DELETE').length).toBe(0);
+  });
+
+  it('confirming deletes via ONE DELETE with the base hash; success reloads and shows CX-3', async () => {
+    const after = fixture(
+      sampleAgents({
+        'my-helper': { description: 'standalone', prompt: 'Helper prompt.' },
+      }),
+    );
+    after.hash = 'hash-post-delete';
+    const { calls } = scriptApi({
+      gets: [fixture(pipelineAgents()), after],
+      pipelines: [PIPELINE_DEFS, { pipelines: {} }],
+      pipelineDeletes: [okWrite('hash-post-delete')],
+    });
+    await renderedPipelines();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete pipeline mypl' }),
+    );
+    const confirm = await screen.findByRole('alertdialog', {
+      name: 'Delete pipeline mypl?',
+    });
+    fireEvent.click(
+      within(confirm).getByRole('button', { name: 'Confirm delete' }),
+    );
+    await screen.findByText('Restart OpenCode to apply');
+    const dels = calls.filter((c) => c.method === 'DELETE');
+    expect(dels.length).toBe(1);
+    expect(dels[0].url).toBe('/api/agent-pipelines/mypl');
+    expect(dels[0].body).toEqual({ hash: 'hash-base-0001' });
+    // Exactly one restart notice, and CONFIG + defs re-read.
+    expect(screen.getAllByText('Restart OpenCode to apply').length).toBe(1);
+    expect(await screen.findByRole('row', { name: 'my-helper' })).toBeTruthy();
+    expect(screen.queryByRole('table', { name: 'Pipeline mypl' })).toBeNull();
+  });
+});
+
+describe('Orchestration — user-owned danger buttons and prompt editing (AP-6, OA-4)', () => {
+  it('danger delete renders ONLY on user-owned standalone rows (AP-6 predicate)', async () => {
+    scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+    });
+    await renderedPipelines();
+    const others = within(otherTable());
+    const helperRow = others.getByRole('row', { name: 'my-helper' });
+    expect(
+      within(helperRow).getByRole('button', { name: 'delete' }),
+    ).toBeTruthy();
+    // Reserved rows never offer delete (sync owns them); members too.
+    // (sdd-* live in the matrix families here — the three exact others rows.)
+    for (const reservedRow of ['explore', 'general', 'gentle-orchestrator']) {
+      const row = others.getByRole('row', { name: reservedRow });
+      expect(within(row).queryByRole('button', { name: 'delete' })).toBeNull();
+    }
+    const memberRow = within(pipelineTable()).getByRole('row', {
+      name: 'mypl-build',
+    });
+    expect(
+      within(memberRow).queryByRole('button', { name: 'delete' }),
+    ).toBeNull();
+  });
+
+  it("user-owned rows get an 'edit prompt' cell; reserved rows keep reader-only (OA-4')", async () => {
+    scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+      // The editor prefetches the current text through the reader endpoint.
+      prompts: [
+        {
+          status: 200,
+          body: {
+            name: 'my-helper',
+            source: 'inline',
+            prompt: 'Helper prompt.',
+          },
+        },
+      ],
+    });
+    await renderedPipelines();
+    const helperRow = within(otherTable()).getByRole('row', {
+      name: 'my-helper',
+    });
+    expect(
+      within(helperRow).getByRole('button', { name: 'edit prompt' }),
+    ).toBeTruthy();
+    expect(
+      within(helperRow).getByRole('button', { name: 'view prompt' }),
+    ).toBeTruthy();
+    for (const reservedRow of ['explore', 'general', 'gentle-orchestrator']) {
+      const row = within(otherTable()).getByRole('row', { name: reservedRow });
+      expect(
+        within(row).queryByRole('button', { name: 'edit prompt' }),
+      ).toBeNull();
+    }
+    // Clicking it opens the editor (wired to 4.4's PromptEditorModal).
+    fireEvent.click(
+      within(helperRow).getByRole('button', { name: 'edit prompt' }),
+    );
+    const dlg = await screen.findByRole('dialog', {
+      name: 'my-helper prompt editor',
+    });
+    expect(within(dlg).getByLabelText('Prompt')).toBeTruthy();
+  });
+
+  it('standalone delete confirms by name, DELETEs once with the hash, reloads', async () => {
+    const after = fixture(
+      sampleAgents({
+        mypl: { mode: 'primary', description: 'd', prompt: 'p' },
+        'mypl-build': {
+          mode: 'subagent',
+          hidden: true,
+          prompt: 'Build prompt.',
+        },
+        'mypl-review': {
+          mode: 'subagent',
+          hidden: true,
+          prompt: 'Review prompt.',
+        },
+      }),
+    );
+    after.hash = 'hash-after-agent-delete';
+    const { calls } = scriptApi({
+      gets: [fixture(pipelineAgents()), after],
+      pipelines: [PIPELINE_DEFS, PIPELINE_DEFS],
+      agentDeletes: [okWrite('hash-after-agent-delete')],
+    });
+    await renderedPipelines();
+    const helperRow = within(otherTable()).getByRole('row', {
+      name: 'my-helper',
+    });
+    fireEvent.click(within(helperRow).getByRole('button', { name: 'delete' }));
+    const confirm = await screen.findByRole('alertdialog', {
+      name: 'Delete my-helper?',
+    });
+    expect(within(confirm).getByText(/backup/i)).toBeTruthy(); // SCW-4 promise
+    fireEvent.click(
+      within(confirm).getByRole('button', { name: 'Confirm delete' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('alertdialog', { name: 'Delete my-helper?' }),
+      ).toBeNull(),
+    );
+    const dels = calls.filter((c) => c.method === 'DELETE');
+    expect(dels.length).toBe(1);
+    expect(dels[0].url).toBe('/api/agents/my-helper');
+    expect(dels[0].body).toEqual({ hash: 'hash-base-0001' });
+  });
+});
+
+describe('Orchestration — default-agent picker offers visible primaries (AP-7)', () => {
+  function defaultPicker(): HTMLSelectElement {
+    return screen.getByRole('combobox', {
+      name: 'Default agent',
+    }) as HTMLSelectElement;
+  }
+
+  it('options exclude subagents/hidden roles; selecting PUTs gated, clears with sentinel', async () => {
+    const { calls } = scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+      defaults: [okWrite('echo-d1')],
+    });
+    await renderedPipelines();
+    const values = optionValues(defaultPicker());
+    // Orchestrators are selectable…
+    expect(values).toContain('mypl');
+    // …hidden role rows are not (loader throw set mirrored client-side).
+    expect(values).not.toContain('mypl-build');
+    expect(values).not.toContain('mypl-review');
+    // Built-ins/standalone stay offered (visibility gate, not ownership).
+    expect(values).toContain('gentle-orchestrator');
+    expect(values).toContain('my-helper');
+    fireEvent.change(defaultPicker(), { target: { value: 'mypl' } });
+    await waitFor(() =>
+      expect(
+        calls.filter(
+          (c) => c.method === 'PUT' && c.url === '/api/config/default-agent',
+        ).length,
+      ).toBe(1),
+    );
+    expect(
+      calls.filter(
+        (c) => c.method === 'PUT' && c.url === '/api/config/default-agent',
+      )[0].body,
+    ).toEqual({ hash: 'hash-base-0001', agent: 'mypl' });
+    expect(screen.getByText('Restart OpenCode to apply')).toBeTruthy();
+  });
+
+  it('the clear option sends agent:null (unset ⇒ build-in fallback, C-R1d)', async () => {
+    const { calls } = scriptApi({
+      gets: [fixture(pipelineAgents())],
+      pipelines: [PIPELINE_DEFS],
+      defaults: [okWrite('echo-clear')],
+    });
+    await renderedPipelines();
+    fireEvent.change(defaultPicker(), { target: { value: '__clear__' } });
+    await waitFor(() =>
+      expect(
+        calls.filter(
+          (c) => c.method === 'PUT' && c.url === '/api/config/default-agent',
+        ).length,
+      ).toBe(1),
+    );
+    expect(
+      calls.filter(
+        (c) => c.method === 'PUT' && c.url === '/api/config/default-agent',
+      )[0].body,
+    ).toEqual({ hash: 'hash-base-0001', agent: null });
+  });
+});
+
+describe('Orchestration — pipeline create via the toggle closes once and re-reads (AC-9’, CX-3)', () => {
+  it('builder submit through the header CTA: modal closes, one restart notice, both reads refresh', async () => {
+    const after = fixture(pipelineAgents());
+    after.hash = 'hash-post-create';
+    const { calls } = scriptApi({
+      gets: [fixture(sampleAgents()), after],
+      pipelines: [{ pipelines: {} }, PIPELINE_DEFS],
+      pipelineWrites: [okWrite('hash-post-create')],
+    });
+    await rendered();
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+    const create = await screen.findByRole('dialog', { name: 'New agent' });
+    fireEvent.click(within(create).getByRole('radio', { name: 'Pipeline' }));
+    const builder = await screen.findByRole('dialog', {
+      name: 'Pipeline builder',
+    });
+    await within(builder).findByText('Reviewer');
+    fireEvent.change(within(builder).getByLabelText('Pipeline name'), {
+      target: { value: 'mypl' },
+    });
+    fireEvent.change(
+      within(builder).getByLabelText('Orchestrator description'),
+      { target: { value: 'coordinate mypl' } },
+    );
+    const roleCard = within(builder).getByLabelText('Role 1');
+    fireEvent.change(within(roleCard).getByLabelText('Role 1 name'), {
+      target: { value: 'mypl-build' },
+    });
+    fireEvent.change(within(roleCard).getByLabelText('Role 1 description'), {
+      target: { value: 'builds' },
+    });
+    fireEvent.change(within(roleCard).getByLabelText('Role 1 prompt'), {
+      target: {
+        value: '# Reviewer\nYou review code changes for correctness first.',
+      },
+    });
+    fireEvent.click(
+      within(builder).getByRole('button', { name: 'Create pipeline' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Pipeline builder' }),
+      ).toBeNull(),
+    );
+    // Exactly ONE restart notice (CX-3) after the batch persisted.
+    expect(screen.getAllByText('Restart OpenCode to apply').length).toBe(1);
+    // CONFIG + definitions both re-read (the group renders from the fresh defs).
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config').length,
+    ).toBe(2);
+    expect(
+      calls.filter(
+        (c) => c.method === 'GET' && c.url === '/api/agent-pipelines',
+      ).length,
+    ).toBe(2);
+    expect(
+      await screen.findByRole('table', { name: 'Pipeline mypl' }),
+    ).toBeTruthy();
+  });
+});
+
+describe('client-ownership — parity with the server authority (AP-6/AC-3)', () => {
+  it('the web predicate copy lists exactly the same reserved surface', () => {
+    expect([...CLIENT_PREFIXES].sort()).toEqual([...RESERVED_PREFIXES].sort());
+    expect([...CLIENT_EXACT].sort()).toEqual([...RESERVED_EXACT].sort());
   });
 });

@@ -312,3 +312,137 @@ describe('patch — structural sharing (design: untouched subtrees keep same ref
     });
   });
 });
+
+// --- agent-pipelines WU-1 task 1.5 (RED) — SCW-7' four widenings ------------
+// New confinement rows: whole-value `agent-pipelines` write, per-entry
+// definition remove, user-owned whole-entry DELETE and user-owned prompt
+// value-op — with ownership enforcement in the ACCUMULATED-TREE loop
+// (def-map ops ordered before row ops make the pipeline-delete batch pass;
+// every other batch on a member throws pipeline_owned naming the owner).
+describe("patch — agent-pipelines section rows (SCW-7' a)", () => {
+  const defMap = {
+    mypl: {
+      roles: [
+        {
+          name: 'mypl-build',
+          description: 'd',
+          promptSource: 'template',
+          prompt: 'p',
+        },
+      ],
+      orchestrator: { description: 'd' },
+    },
+  };
+
+  it('admits the whole-value agent-pipelines write and the per-entry remove', () => {
+    const out = patch(fixtureTree(), [
+      set(['agent-pipelines'], defMap),
+      del(['agent-pipelines', 'mypl']),
+    ]);
+    expect(out.applied).toBe(2);
+    expect(out.tree['agent-pipelines']).toEqual({});
+  });
+
+  it('rejects whole-MAP removal, per-entry def writes and off-list generated fields', () => {
+    const tree = fixtureTree();
+    expect(rejected(tree, del(['agent-pipelines'])).code).toBe('off_allowlist');
+    expect(
+      rejected(tree, set(['agent-pipelines', 'mypl'], defMap.mypl)).code,
+    ).toBe('off_allowlist');
+    for (const field of ['mode', 'hidden', 'permission']) {
+      expect(
+        rejected(tree, set(['agent', 'my-helper', field], 'nope')).code,
+        field,
+      ).toBe('off_allowlist');
+    }
+    for (const name of ['__proto__', '..', 'constructor']) {
+      expect(rejected(tree, del(['agent-pipelines', name])).code, name).toBe(
+        'off_allowlist',
+      );
+    }
+    expect(JSON.stringify(tree, null, 2)).toBe(RAW);
+  });
+});
+
+describe('patch — accumulated-tree ownership gates (SCW-7 b/d, AP-4)', () => {
+  const treeWithPipeline = (): ConfigTree => ({
+    agent: {
+      mypl: { mode: 'primary', prompt: 'orch', description: 'd' },
+      'mypl-build': { mode: 'subagent', hidden: true, prompt: 'p' },
+      'free-agent': { prompt: 'keep' },
+    },
+    'agent-pipelines': {
+      mypl: {
+        roles: [
+          {
+            name: 'mypl-build',
+            description: 'd',
+            promptSource: 'template',
+            prompt: 'p',
+          },
+        ],
+        orchestrator: { description: 'd' },
+      },
+    },
+  });
+
+  it('member via standalone remove → pipeline_owned naming the owner', () => {
+    const err = rejected(treeWithPipeline(), del(['agent', 'mypl-build']));
+    expect(err.code).toBe('pipeline_owned');
+    expect(err.message).toContain('mypl');
+  });
+
+  it('def-map-minus-entry FIRST, then removes → the delete batch passes in order', () => {
+    const tree = treeWithPipeline();
+    const out = patch(tree, [
+      set(['agent-pipelines'], {}),
+      del(['agent', 'mypl']),
+      del(['agent', 'mypl-build']),
+    ]);
+    expect(out.applied).toBe(3);
+    expect(Object.keys(out.tree.agent as object)).toEqual(['free-agent']);
+    expect(JSON.stringify(tree.agent)).toContain('mypl-build'); // input intact
+  });
+
+  it('builder rewrite pair (remove+insert, same path) passes mid-batch', () => {
+    const out = patch(treeWithPipeline(), [
+      del(['agent', 'mypl-build']),
+      ins(['agent', 'mypl-build'], {
+        mode: 'subagent',
+        hidden: true,
+        prompt: 'regenerated',
+      }),
+    ]).tree;
+    expect((out.agent as Record<string, ConfigTree>)['mypl-build'].prompt).toBe(
+      'regenerated',
+    );
+  });
+
+  it('generic value paths on members rejected; user-owned untouched (AP-4, SCW-7 b)', () => {
+    const tree = treeWithPipeline();
+    const err = rejected(tree, set(['agent', 'mypl-build', 'model'], 'x'));
+    expect(err.code).toBe('pipeline_owned');
+    expect(err.message).toContain('mypl');
+    const ok = patch(tree, [
+      set(['agent', 'free-agent', 'description'], 'fine'),
+      set(['agent', 'free-agent', 'prompt'], 'user-owned text'),
+    ]);
+    expect(ok.applied).toBe(2);
+  });
+
+  it('prompt row gated to user-owned (SCW-7 c): reserved rejected, absent leaf remove inert', () => {
+    const tree = fixtureTree();
+    expect(rejected(tree, set(['agent', 'sdd-spec', 'prompt'], 'x')).code).toBe(
+      'off_allowlist',
+    );
+    const ok = patch(tree, [
+      ins(['agent', 'my-helper'], { prompt: 'created' }),
+      set(['agent', 'my-helper', 'prompt'], 'user-owned text'),
+      del(['agent', 'ghost-of-agent-past']),
+    ]);
+    expect(ok.applied).toBe(3);
+    expect(
+      (ok.tree.agent as Record<string, ConfigTree>)['my-helper'].prompt,
+    ).toBe('user-owned text');
+  });
+});

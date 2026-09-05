@@ -16,10 +16,15 @@
 //   provider.<id>.options.baseURL | provider.<id>.options.apiKey
 //   provider.<id>.models.<model-id>      (whole entries only)
 //   agent.<name>.model | .description | .temperature | .variant
-//   agent.<name>          (whole entry — SET-ONLY, value ops with insert===true,
-//                          create via POST /api/agents; never update or delete)
+//                        (pipeline-owned names rejected in the loop — AP-4)
+//   agent.<name>.prompt  (SCW-7' c — value op, user-owned names only)
+//   agent.<name>          (whole entry — SET-ONLY create via insert===true,
+//                          and SCW-7' d user-owned DELETE (remove), members
+//                          gated against the accumulated definition map)
+//   agent-pipelines       (SCW-7' a — whole-value write; per-entry remove)
 //   default_agent
 import type { ConfigTree } from '../../../shared/types';
+import { findPipelineOwner, isReserved } from './ownership';
 
 export interface PatchOp {
   /** Dot path as segments, e.g. ["provider","nan","models","glm5.3-flash"]. */
@@ -43,7 +48,12 @@ export interface PatchOutcome {
   applied: number;
 }
 
-export type PatchErrorCode = 'off_allowlist' | 'bad_op' | 'exists';
+export type PatchErrorCode =
+  | 'off_allowlist'
+  | 'bad_op'
+  | 'exists'
+  /** SCW-7' b/d confinement: pipeline members never answer to generic rows. */
+  | 'pipeline_owned';
 
 /** Rejected patch. `path` names the offending dot path for 400 responses. */
 export class PatchError extends Error {
@@ -73,8 +83,16 @@ const AGENT_FIELDS = new Set([
   'temperature',
   'variant',
 ]);
-/** Object keys that would enable prototype pollution via dynamic access. */
-const UNSAFE_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
+/** Object keys that would enable prototype pollution or path traversal via
+ * dynamic access (`.`/`..` pass NAME_RE but are segment-hostile — AC-2 gate
+ * backstop, threat name/path-injection). */
+const UNSAFE_SEGMENTS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  '.',
+  '..',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -88,9 +106,18 @@ function isId(segment: string | undefined): segment is string {
   );
 }
 
-/** Exact Allowlist match for a dot path (SCW-7). */
+/** Exact Allowlist match for a dot path (SCW-7 / SCW-7' four widenings).
+ * Ownership-content gates (pipeline members, reserved prompt names) are
+ * decided per-op against the ACCUMULATED TREE in patch() — see below. */
 function isAllowlisted(path: readonly string[], op: PatchOp): boolean {
-  if (path.length === 1) return path[0] === 'default_agent';
+  if (path.length === 1) {
+    // The def map is always written WHOLE or per-entry-removed — the map
+    // itself is never deletable (AP-5 deletes entry by entry).
+    return (
+      path[0] === 'default_agent' ||
+      (path[0] === 'agent-pipelines' && !op.remove)
+    );
+  }
   if (!isId(path[0])) return false;
 
   if (path[0] === 'provider' && isId(path[1])) {
@@ -102,17 +129,26 @@ function isAllowlisted(path: readonly string[], op: PatchOp): boolean {
     return path.length === 4 && path[2] === 'models' && isId(path[3]);
   }
 
-  if (path[0] === 'agent' && isId(path[1]) && path.length === 2) {
-    // Whole-entry create row (SCW-7 set-only): admitted as a value op with
-    // the insert flag, nothing else — remove or bare value stays off-list.
-    return op.insert === true && !op.remove;
+  // SCW-7' (a): per-definition REMOVE on the def map. Whole-value SETS ride
+  // the length-1 path above; the map itself is never deletable (AP-5 deletes
+  // entry by entry) and per-entry def WRITES are off-list — the definition
+  // map is always written whole (single-source-of-truth writes).
+  if (path[0] === 'agent-pipelines' && path.length === 2 && isId(path[1])) {
+    return op.remove === true;
   }
-  return (
-    path[0] === 'agent' &&
-    isId(path[1]) &&
-    path.length === 3 &&
-    AGENT_FIELDS.has(path[2])
-  );
+
+  if (path[0] === 'agent' && isId(path[1]) && path.length === 2) {
+    // Whole-entry rows (SCW-7' set-only create + (d) user-owned DELETE):
+    // insert with the create flag, or remove (ownership-gated in the loop).
+    return op.remove === true || (op.insert === true && !op.remove);
+  }
+  if (path[0] === 'agent' && isId(path[1]) && path.length === 3) {
+    // (c) prompt VALUE op — user-owned gate is ownership-free, reserved-check
+    // runs in the loop. Never a remove: prompts are not deletable in place.
+    if (path[2] === 'prompt') return !op.remove && op.insert !== true;
+    return AGENT_FIELDS.has(path[2]);
+  }
+  return false;
 }
 
 function checkOp(op: PatchOp, index: number): void {
@@ -196,12 +232,74 @@ function setIn(
  * Apply `ops` to `tree` without touching the input. Throws PatchError on the
  * first invalid op after checking ALL ops, so a rejected batch never mutates
  * anything and a 400 can name the path (threat file-write #1 response).
+ *
+ * SCW-7' b/c/d confinement runs in the ACCUMULATED-TREE loop: each op is
+ * checked against the state earlier ops of THIS batch produced. That is what
+ * makes the design's delete ordering (def-map-minus-entry FIRST, then row
+ * removes) decisive — a pipeline member answers to row (d) only after its
+ * definition stopped claiming it; standalone member removals throw
+ * pipeline_owned naming the owner. The builder's row-regeneration pair
+ * (remove+insert on the same path, mid lifecycle batch) is not a deletion:
+ * a present paired insert admits the remove.
  */
 export function patch(tree: ConfigTree, ops: readonly PatchOp[]): PatchOutcome {
   ops.forEach(checkOp);
 
+  const agentName = (path: readonly string[]): string | undefined =>
+    path[0] === 'agent' && isId(path[1]) ? path[1] : undefined;
+  const inserted = new Set(
+    ops
+      .filter((op) => op.insert === true && !op.remove)
+      .map((op) => op.path.join('.')),
+  );
+
   let current = tree;
   for (const [opIndex, op] of ops.entries()) {
+    const dotted = op.path.join('.');
+    const name = agentName(op.path);
+    if (name !== undefined) {
+      const owner = findPipelineOwner(current, name);
+      if (op.path.length === 3 && op.path[2] === 'prompt') {
+        // (c) user-owned gate (AP-6: user-owned ⇔ ¬reserved).
+        if (isReserved(name)) {
+          throw new PatchError(
+            'off_allowlist',
+            dotted,
+            opIndex,
+            `Mutation rejected at "${dotted}": agent "${name}" is owned by gentle-ai sync — its prompt is never writable through the dashboard (SCW-7 c).`,
+          );
+        }
+      } else if (op.path.length === 2 && op.remove === true) {
+        // (d) user-owned standalone gate: reserved names never delete, and
+        // pipeline members only answer after their definition stopped
+        // claiming them (delete-batch ordering) or via a paired rewrite.
+        if (isReserved(name)) {
+          throw new PatchError(
+            'off_allowlist',
+            dotted,
+            opIndex,
+            `Mutation rejected at "${dotted}": agent "${name}" is owned by gentle-ai sync — never deletable through the dashboard (SCW-7 d).`,
+          );
+        }
+        if (owner !== undefined && !inserted.has(dotted)) {
+          // SCW-7a half: definitions cannot bypass delete gates.
+          throw new PatchError(
+            'pipeline_owned',
+            dotted,
+            opIndex,
+            `Mutation rejected at "${dotted}": agent "${name}" is a member of pipeline "${owner}" — delete the pipeline (which removes its rows atomically) instead of removing the member.`,
+          );
+        }
+      } else if (op.path.length === 3 && owner !== undefined) {
+        // AP-4: generic edits on members belong to the pipeline builder.
+        throw new PatchError(
+          'pipeline_owned',
+          dotted,
+          opIndex,
+          `Mutation rejected at "${dotted}": agent "${name}" is a member of pipeline "${owner}" — generic edits are rejected; edit it through the pipeline builder.`,
+        );
+      }
+    }
     // Set-only create row: an insert over a present leaf is rejected here —
     // still pre-disk, so the caller answers 400 agent_exists (SCW-7/AC-1).
     if (op.insert && !op.remove && leafPresent(current, op.path)) {

@@ -13,6 +13,10 @@ export interface ConfigTree {
   provider?: Record<string, unknown>;
   default_agent?: string;
   agent?: Record<string, unknown>;
+  /** Pipeline definitions (AP-1): editing/provenance truth — `agent.*` rows
+   * stay the runtime truth. Inert to OpenCode decode, sync-merge-surviving
+   * (C-R2/C-G1); shape-policed by validate's strict agentPipelinesSchema. */
+  'agent-pipelines'?: Record<string, PipelineDefinition>;
   [key: string]: unknown;
 }
 
@@ -79,6 +83,10 @@ export interface AgentConfigEntry {
   temperature?: number;
   variant?: string;
   prompt?: string;
+  /** agent-pipelines (AP-2): server-generated pipeline-row fields. Plain
+   * OpenCode keys — the web surfaces them for grouping/gating (mode/hidden). */
+  mode?: string;
+  hidden?: boolean;
   [key: string]: unknown;
 }
 
@@ -277,4 +285,75 @@ export interface AgentPromptResponse {
   /** Present only for `source:'file'` — the config-dir-relative ref string. */
   ref?: string;
   prompt: string;
+}
+
+// --- agent-pipelines (AP-1..AP-5): definition DTOs + request bodies ----------
+
+/**
+ * One role in a pipeline definition (AP-1). `prompt` holds the RESOLVED
+ * literal text — template/clone materialized client-side per AT-2/AT-3,
+ * never a `{file:}` ref, ≤ 64 KiB (the def is provenance truth; the
+ * materialized `agent.<name>` row is runtime truth).
+ */
+export interface PipelineRoleDef {
+  name: string;
+  /** Absent ⇒ invoker-model inheritance at delegation (C-R1e) — never invented. */
+  model?: string;
+  description: string;
+  promptSource: 'template' | 'clone' | 'free-text';
+  prompt: string;
+}
+
+/**
+ * Orchestrator INPUT (AC-4'): model + description only — the prompt and
+ * `permission.task` are server-generated (AP-3), the row is named by the
+ * pipeline key itself.
+ */
+export interface PipelineOrchestratorDef {
+  model?: string;
+  description: string;
+}
+
+/** One `agent-pipelines[<pipeline>]` value — exact AP-1 shape (strict zod). */
+export interface PipelineDefinition {
+  roles: PipelineRoleDef[];
+  orchestrator: PipelineOrchestratorDef;
+  /** Delegated-to names (task-map allows only; never materialized, AP-6). */
+  helpers?: string[];
+}
+
+/** AC-4' role INPUT: identical shape to the stored def; whitelist-gated. */
+export type PipelineRoleInput = PipelineRoleDef;
+
+/** POST/PUT /api/agent-pipelines[/name] body (AC-9'): one atomic batch. */
+export interface PipelineSubmitRequest {
+  hash: string;
+  pipeline: {
+    name: string;
+    orchestrator: PipelineOrchestratorDef;
+    roles: PipelineRoleInput[];
+    helpers?: string[];
+  };
+}
+
+/**
+ * GET /api/agent-pipelines response — the definition read surface (builder
+ * edit-prefill + view grouping). Raw pass-through of the CONFIG map: reads
+ * never validate (shape policing is the WRITE gate's job), so an
+ * externally-authored entry mirrors back exactly as stored.
+ */
+export interface AgentPipelinesResponse {
+  pipelines: Record<string, PipelineDefinition>;
+}
+
+/** PUT /api/agents/:name/prompt body (SCW-7c; lockstep second op when role). */
+export interface UpdatePromptRequest {
+  hash: string;
+  prompt: string;
+}
+
+/** PUT /api/config/default-agent body (AP-7). `agent: null` clears the key. */
+export interface SetDefaultAgentRequest {
+  hash: string;
+  agent: string | null;
 }

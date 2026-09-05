@@ -202,6 +202,27 @@ export async function requireProvider(
 }
 
 /**
+ * Gate 8 (AC-6): is `model` a `<provider>/<model-id>` pair in this CONFIG?
+ * Matched against the constructed pair set — the OA-2 installedPairs rule,
+ * server-side, so no provider/model id ambiguity from naive splitting.
+ * (Moved verbatim from routes/agents.ts in agent-pipelines WU-2a so the
+ * pipeline endpoints share the same installed-pair authority.)
+ */
+export async function modelIsInstalled(model: unknown): Promise<boolean> {
+  if (typeof model !== 'string') return false;
+  const providers = (await load()).tree.provider;
+  if (!isRecord(providers)) return false;
+  for (const [pid, entry] of Object.entries(providers)) {
+    const models =
+      isRecord(entry) && isRecord(entry['models']) ? entry['models'] : {};
+    for (const mid of Object.keys(models)) {
+      if (`${pid}/${mid}` === model) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Agent gate for OA-2: there is NO allowlist of agent names — any agent
  * present under CONFIG `agent.*` is writable — but the agent must exist
  * (a ghost name is a typo, not something to invent in CONFIG).
