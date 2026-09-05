@@ -25,6 +25,7 @@ import {
   getConfig,
   getTemplates,
 } from '../api';
+import { IconClose, IconPlus } from '../icons';
 import { ConflictModal, type ConflictInfo } from './ConflictModal';
 
 export interface CreateAgentModalProps {
@@ -290,7 +291,7 @@ export function CreateAgentModal({
             onClick={onClose}
             disabled={busy}
           >
-            Close
+            <IconClose /> Close
           </button>
           <button
             type="submit"
@@ -299,7 +300,7 @@ export function CreateAgentModal({
               busy || conflict !== null || name.trim() === '' || prompt === ''
             }
           >
-            Create
+            <IconPlus /> Create
           </button>
         </div>
       </form>

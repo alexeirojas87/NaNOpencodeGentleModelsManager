@@ -15,6 +15,7 @@ import { useState } from 'react';
 
 import type { SyncResponse } from '../../../shared/types';
 import { ApiError, runSync } from '../api';
+import { IconAlert, IconCheck, IconSpinner, IconSync } from '../icons';
 
 export interface SyncPanelProps {
   /** Called after a SUCCESSFUL sync so the owner can reload CONFIG (OA-3). */
@@ -74,12 +75,16 @@ export function SyncPanel({ onSynced }: SyncPanelProps) {
         disabled={running}
         onClick={() => void run()}
       >
-        Run sync
+        <IconSync /> Run sync
       </button>
-      {running && <p className="muted">Running gentle-ai sync…</p>}
+      {running && (
+        <p className="muted">
+          <IconSpinner /> Running gentle-ai sync…
+        </p>
+      )}
       {error && (
         <div role="alert" className="sync-error">
-          {error}
+          <IconAlert /> {error}
         </div>
       )}
       {result && (
@@ -93,7 +98,11 @@ export function SyncPanel({ onSynced }: SyncPanelProps) {
           )}
         </div>
       )}
-      {succeeded && <p role="status">Sync succeeded — CONFIG reloaded.</p>}
+      {succeeded && (
+        <p role="status">
+          <IconCheck /> Sync succeeded — CONFIG reloaded.
+        </p>
+      )}
     </section>
   );
 }

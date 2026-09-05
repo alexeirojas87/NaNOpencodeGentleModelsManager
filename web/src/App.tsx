@@ -1,10 +1,14 @@
 // WU6.1 — application shell: left rail navigation (Providers · Models ·
-// Orchestration · Status) over the utility-console token theme. The rail is
-// chrome only; each section owns its data. Providers shipped with WU6,
-// Models with WU7, Orchestration with WU8 and Status with WU10 — all four
-// sections are real views now, so the placeholder panel is gone.
+// Orchestration · Status) over the utility-console token theme, restyled to
+// the light indigo tokens in orchestration-v2 WU-C (bundled rail icons +
+// pill-shaped active item, TH-3/TH-5). The rail is chrome only; each
+// section owns its data. Providers shipped with WU6, Models with WU7,
+// Orchestration with WU8 and Status with WU10 — all four sections are real
+// views now, so the placeholder panel is gone.
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 
+import { IconCube, IconList, IconPlug, IconPulse } from './icons';
 import ModelsView from './views/ModelsView';
 import OrchestrationView from './views/OrchestrationView';
 import ProvidersView from './views/ProvidersView';
@@ -18,6 +22,14 @@ const SECTIONS = [
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]['id'];
+
+/** One bundled glyph per section (aria-hidden; the label names the button). */
+const RAIL_ICONS: Record<SectionId, ReactNode> = {
+  providers: <IconPlug />,
+  models: <IconCube />,
+  orchestration: <IconList />,
+  status: <IconPulse />,
+};
 
 export default function App() {
   const [section, setSection] = useState<SectionId>('providers');
@@ -35,6 +47,7 @@ export default function App() {
             aria-current={section === item.id ? 'page' : undefined}
             onClick={() => setSection(item.id)}
           >
+            {RAIL_ICONS[item.id]}
             {item.label}
           </button>
         ))}

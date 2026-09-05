@@ -5,6 +5,7 @@
 // keeping the pending edits re-appliable; "Overwrite" retries the write
 // against the new base hash.
 import type { ConfigResponse } from '../../../shared/types';
+import { IconAlert } from '../icons';
 
 export interface ConflictRow {
   path: string;
@@ -40,7 +41,9 @@ export function ConflictModal({
   return (
     <div className="overlay">
       <div role="dialog" aria-label="Config conflict" className="modal">
-        <h2>Config changed externally — write rejected</h2>
+        <h2>
+          <IconAlert /> Config changed externally — write rejected
+        </h2>
         <p className="modal-note">{info.message}</p>
         <p className="modal-hashes">
           Your base <code>{info.expected}</code> · current file{' '}

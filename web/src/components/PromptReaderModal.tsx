@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 
 import type { AgentPromptResponse } from '../../../shared/types';
 import { getAgentPrompt } from '../api';
+import { IconClose } from '../icons';
 
 export function PromptReaderModal({
   agentName,
@@ -75,7 +76,7 @@ export function PromptReaderModal({
         )}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
-            Close
+            <IconClose /> Close
           </button>
         </div>
       </div>

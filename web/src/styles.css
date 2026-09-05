@@ -1,17 +1,48 @@
-/* WU6.1 — utility-console theme (design §UI "moderno pero sencillo").
-   A working config tool, not a landing page: dark neutral surfaces, one
-   amber accent reserved for drift/unsaved/warning states, and a single
+/* WU6.1 theme, migrated in orchestration-v2 WU-C (design token map TH-1..4).
+   A working config tool, not a landing page: light neutral surfaces, one
+   indigo accent for interactive/focus states, the amber family kept as a
+   dedicated --warning for drift/banner/error semantics (D6), and a single
    superfamily (IBM Plex Sans for prose, Plex Mono for ids/paths/values).
-   Motion is limited to the save bar; focus-visible and reduced-motion are
+   Every color, radius and shadow is a :root token (TH-1 — one-knob retheme,
+   machine-checked by contrast.test.ts at WCAG 2.1 AA); motion is limited to
+   the save bar and the bundled spinner; focus-visible and reduced-motion are
    honored. */
 
 :root {
-  --bg: #14161a;
-  --surface: #1b1e24;
-  --line: #2a2f38;
-  --text: #d8dce3;
-  --muted: #8b94a3;
-  --accent: #e5b95c;
+  /* Surfaces & text — light theme (TH-2). Ratios: contrast.test.ts. */
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --line: #e2e5ea;
+  --text: #1f2430;
+  --muted: #5b6472;
+  /* Indigo accent family (TH-3): --accent carries focus rings and UI parts
+     (>=3:1), --accent-strong carries links/active-nav/primary buttons with
+     --on-accent-strong text (>=4.5:1), --accent-active is the hover stop. */
+  --accent: #6366f1;
+  --accent-strong: #4f46e5;
+  --accent-active: #4338ca;
+  --on-accent-strong: #ffffff;
+  /* Warning family (D6): drift chips, restart banners, save-bar/validation
+     errors — the old dual-role amber narrowed to warning semantics only. */
+  --warning: #b45309;
+  --warning-tint: #fffbeb;
+  /* Pastel icon tiles — fg/bg pairs, all >=6.3:1 (TH-3 design language). */
+  --tile-blue-fg: #1e40af;
+  --tile-blue-bg: #dbeafe;
+  --tile-green-fg: #166534;
+  --tile-green-bg: #dcfce7;
+  --tile-purple-fg: #5b21b6;
+  --tile-purple-bg: #ede9fe;
+  --tile-yellow-fg: #92400e;
+  --tile-yellow-bg: #fef3c7;
+  --tile-neutral-fg: #475569;
+  --tile-neutral-bg: #eef0f4;
+  /* Radii & shadows: cards 12, controls 8, pills 999; soft card shadow. */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  --overlay: rgb(15 23 42 / 45%);
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
 }
@@ -37,12 +68,61 @@ body {
   color: var(--muted);
 }
 
+/* --- pastel icon tiles + bundled spinner (WU-C, TH-3/TH-5) -----------------
+   Small square badges that carry a 16px currentColor icon; every fg/bg pair
+   is a token and contrast.test.ts pins each pair at AA. The spinner rides
+   the global reduced-motion block (static fallback when motion is off). */
+
+.tile {
+  border-radius: var(--radius-control);
+  display: inline-grid;
+  flex: none;
+  height: 28px;
+  place-items: center;
+  width: 28px;
+}
+
+.tile-blue {
+  background: var(--tile-blue-bg);
+  color: var(--tile-blue-fg);
+}
+
+.tile-green {
+  background: var(--tile-green-bg);
+  color: var(--tile-green-fg);
+}
+
+.tile-purple {
+  background: var(--tile-purple-bg);
+  color: var(--tile-purple-fg);
+}
+
+.tile-yellow {
+  background: var(--tile-yellow-bg);
+  color: var(--tile-yellow-fg);
+}
+
+.tile-neutral {
+  background: var(--tile-neutral-bg);
+  color: var(--tile-neutral-fg);
+}
+
+.icon-spin {
+  animation: icon-spin 0.9s linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 code {
   font-family: var(--font-mono);
   font-size: 12.5px;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   padding: 0 4px;
 }
 
@@ -78,28 +158,35 @@ code {
 }
 
 .rail-brand span {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .rail-item {
-  text-align: left;
+  align-items: center;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
-  font: inherit;
-  padding: 8px 10px;
   cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 9px;
+  padding: 8px 10px;
+  text-align: left;
 }
 
 .rail-item:hover {
   background: var(--surface);
 }
 
+/* Active navigation is a filled indigo pill (TH-3 design language), not the
+   old inset bar; white pill text is the --on-accent-strong contrast pair. */
 .rail-item[aria-current='page'] {
-  background: var(--surface);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-strong);
+  border-radius: var(--radius-pill);
+  color: var(--on-accent-strong);
   font-weight: 600;
+  padding: 8px 14px;
 }
 
 .rail-foot {
@@ -116,6 +203,9 @@ code {
 /* --- views + provider cards ------------------------------------------------ */
 
 .view-header h2 {
+  align-items: center;
+  display: flex;
+  gap: 10px;
   margin: 0 0 2px;
   font-size: 18px;
   font-weight: 600;
@@ -134,7 +224,8 @@ code {
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   padding: 16px 18px 18px;
 }
 
@@ -144,6 +235,12 @@ code {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.card-header h2 {
+  align-items: center;
+  display: flex;
+  gap: 10px;
 }
 
 .card-header h3 {
@@ -169,7 +266,7 @@ code {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font: inherit;
   padding: 6px 9px;
@@ -193,13 +290,15 @@ code {
 
 .badge {
   font-size: 11.5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 9px;
   white-space: nowrap;
 }
 
+/* Presence is a positive/interactive state, not a warning: indigo family,
+   --accent-strong keeps the small text AA on light surfaces. */
 .badge-set {
-  color: var(--accent);
+  color: var(--accent-strong);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
@@ -211,13 +310,14 @@ code {
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   padding: 18px 20px;
 }
 
 .error-panel [role='alert'],
 .error-panel {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--line));
 }
 
 /* --- restart banner (CX-3) -------------------------------------------------- */
@@ -227,10 +327,10 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  border-radius: 8px;
-  color: var(--accent);
+  background: var(--warning-tint);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  border-radius: var(--radius-card);
+  color: var(--warning);
   font-weight: 500;
   margin: 0 0 18px;
   padding: 9px 14px;
@@ -238,8 +338,8 @@ code {
 
 .banner-dismiss {
   background: none;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--radius-control);
   color: var(--muted);
   cursor: pointer;
   font: inherit;
@@ -269,7 +369,7 @@ code {
 }
 
 .savebar-error {
-  color: var(--accent);
+  color: var(--warning);
   flex: 1;
   min-width: 0;
   font-size: 12.5px;
@@ -283,12 +383,15 @@ code {
 }
 
 .btn {
-  background: var(--bg);
+  align-items: center;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   cursor: pointer;
+  display: inline-flex;
   font: inherit;
+  gap: 6px;
   padding: 6px 16px;
 }
 
@@ -298,11 +401,18 @@ code {
   opacity: 0.6;
 }
 
+/* Primary CTA: filled indigo (6.3:1 white label), hover deepens to the
+   active stop. The old amber button text was the hardcoded dark page bg. */
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #14161a;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--on-accent-strong);
   font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
 }
 
 /* --- conflict modal (SCW-2) ---------------------------------------------------- */
@@ -310,7 +420,7 @@ code {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 55%);
+  background: var(--overlay);
   display: grid;
   place-items: center;
   padding: 24px;
@@ -320,14 +430,18 @@ code {
 .modal {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
   max-width: 720px;
   width: 100%;
   padding: 20px 24px 22px;
 }
 
 .modal h2 {
+  align-items: center;
+  display: flex;
   font-size: 16px;
+  gap: 8px;
   margin: 0 0 6px;
 }
 
@@ -398,7 +512,7 @@ code {
 .model-drawer select {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font: inherit;
   padding: 6px 9px;
@@ -436,11 +550,12 @@ code {
   gap: 6px;
 }
 
-/* The design signature: declared-vs-snapshot, in the single amber accent. */
+/* The design signature: declared-vs-snapshot, in the amber --warning
+   family (D6: advisory drift keeps the old accent's warning role). */
 .chip-drift {
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 999px;
-  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--warning);
   font-size: 11.5px;
   padding: 0 9px;
 }
@@ -541,7 +656,7 @@ code {
 .orch-table select {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -571,7 +686,7 @@ code {
 
 .ro-flag {
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 11px;
   padding: 0 8px;
@@ -604,9 +719,9 @@ code {
 
 .create-form input,
 .create-form select {
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font: inherit;
   padding: 6px 9px;
@@ -620,7 +735,7 @@ code {
 .prompt-preview {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -631,8 +746,9 @@ code {
   white-space: pre-wrap;
 }
 
+/* Form validation errors carry warning semantics (D6), like the save bar. */
 .field-error {
-  color: var(--accent);
+  color: var(--warning);
   font-size: 12px;
   margin: 4px 0 0;
 }
@@ -657,11 +773,11 @@ code {
   margin: 0;
 }
 
-/* exit-code chip: neutral for 0, amber (the reserved warning state) for
-   any other exit — same token discipline as the drift chip. */
+/* exit-code chip: neutral for 0, --warning for any other exit — same token
+   discipline as the drift chip. */
 .chip-exit-ok,
 .chip-exit-fail {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--font-mono);
@@ -671,8 +787,8 @@ code {
 }
 
 .chip-exit-fail {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  color: var(--warning);
 }
 
 .sync-out {
@@ -682,7 +798,7 @@ code {
 .sync-out pre {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   font-size: 12px;
   margin: 4px 0 0;
   max-height: 320px;
@@ -700,9 +816,9 @@ code {
 }
 
 .sync-error {
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
-  border-radius: 6px;
-  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--line));
+  border-radius: var(--radius-control);
+  color: var(--warning);
   font-size: 13px;
   margin-top: 10px;
   padding: 8px 12px;

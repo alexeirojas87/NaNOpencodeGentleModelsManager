@@ -26,6 +26,7 @@ import {
   postModel,
   putModel,
 } from '../api';
+import { IconCube, IconPlus } from '../icons';
 import { SaveBar } from '../components/SaveBar';
 
 // --- form draft ------------------------------------------------------------
@@ -535,7 +536,12 @@ export default function ModelsView() {
   return (
     <div className="view">
       <header className="view-header">
-        <h2>Models</h2>
+        <h2>
+          <span className="tile tile-purple">
+            <IconCube />
+          </span>
+          Models
+        </h2>
         <p className="muted">
           Declared model entries per provider. Snapshot values are shown
           side-by-side as advisory — your declared values always win.
@@ -577,7 +583,7 @@ export default function ModelsView() {
           className="btn btn-primary"
           onClick={() => setPickerOpen(true)}
         >
-          Add model
+          <IconPlus /> Add model
         </button>
         {selectedDrift.length > 0 && (
           <span className="muted drift-note">

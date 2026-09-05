@@ -17,6 +17,7 @@ import {
   putProvider,
   type ProviderWrite,
 } from '../api';
+import { IconPlug } from '../icons';
 import {
   ConflictModal,
   type ConflictInfo,
@@ -289,7 +290,12 @@ export default function ProvidersView() {
   return (
     <div className="view">
       <header className="view-header">
-        <h2>Providers</h2>
+        <h2>
+          <span className="tile tile-blue">
+            <IconPlug />
+          </span>
+          Providers
+        </h2>
         <p className="muted">
           Edit provider display name, npm package and base URL. API keys are
           stored opaquely — replace only, never shown.

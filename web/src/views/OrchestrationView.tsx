@@ -21,6 +21,7 @@ import type {
   MaskedProvider,
 } from '../../../shared/types';
 import { ApiError, getConfig, putAgentModel } from '../api';
+import { IconFileText, IconList, IconPlus } from '../icons';
 import {
   ConflictModal,
   type ConflictInfo,
@@ -271,7 +272,7 @@ function PromptCell({
     <div className="ro-extras">
       {hasPrompt && (
         <button type="button" className="btn" onClick={() => onRead(agentName)}>
-          view prompt
+          <IconFileText /> view prompt
         </button>
       )}
       {markers.map((key) => (
@@ -368,13 +369,18 @@ export default function OrchestrationView() {
     return (
       <div className="panel">
         <div className="card-header">
-          <h2>Orchestration</h2>
+          <h2>
+            <span className="tile tile-green">
+              <IconList />
+            </span>
+            Orchestration
+          </h2>
           <button
             type="button"
             className="btn btn-primary"
             onClick={() => setCreateOpen(true)}
           >
-            Create agent
+            <IconPlus /> Create agent
           </button>
         </div>
         <p className="muted">No agents declared</p>
@@ -411,7 +417,12 @@ export default function OrchestrationView() {
   return (
     <div className="view">
       <header className="view-header">
-        <h2>Orchestration</h2>
+        <h2>
+          <span className="tile tile-green">
+            <IconList />
+          </span>
+          Orchestration
+        </h2>
         <p className="muted">
           Model assignment per agent, derived from <code>agent.*</code> in
           CONFIG
@@ -431,7 +442,7 @@ export default function OrchestrationView() {
           className="btn btn-primary"
           onClick={() => setCreateOpen(true)}
         >
-          Create agent
+          <IconPlus /> Create agent
         </button>
       </header>
 

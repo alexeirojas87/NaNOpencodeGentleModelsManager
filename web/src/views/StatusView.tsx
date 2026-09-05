@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { StatusResponse } from '../../../shared/types';
 import { getStatus } from '../api';
+import { IconPulse, IconRefresh, IconSpinner } from '../icons';
 
 /** ISO 8601 (UTC) rendering of an epoch-ms stamp — deterministic, locale-free. */
 function iso(ms: number): string {
@@ -69,7 +70,12 @@ export default function StatusView() {
   return (
     <div className="view">
       <header className="view-header">
-        <h2>Status</h2>
+        <h2>
+          <span className="tile tile-yellow">
+            <IconPulse />
+          </span>
+          Status
+        </h2>
         <p className="muted">
           Read-only view of what the server currently sees — the CONFIG
           identity, advisory drift, restore points and the restart flag.
@@ -80,7 +86,7 @@ export default function StatusView() {
           onClick={() => void reload()}
           disabled={refreshing}
         >
-          Refresh
+          {refreshing ? <IconSpinner /> : <IconRefresh />} Refresh
         </button>
       </header>
 
