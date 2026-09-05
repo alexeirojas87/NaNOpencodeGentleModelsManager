@@ -14,15 +14,22 @@ Prerequisites: Node ≥ 22.22.2 and pnpm 11 (pinned via `packageManager`).
 
 ```bash
 pnpm install
-pnpm dev            # server on http://127.0.0.1:8787 + Vite UI on http://localhost:5173
+pnpm start            # one command: build + serve on http://127.0.0.1:8787
 ```
 
-Open the Vite URL; it proxies `/api` to the server. If port 8787 is already
-held by another process on your machine, stop that process first — the
-server binds `127.0.0.1:8787` and fails loudly on collision.
+`pnpm start` builds the web bundle and serves UI and API from the same
+process — open the printed URL. If port 8787 is already held on your
+machine, pick another for the run: `PORT=8791 pnpm start` (the port only
+needs to be free; production UI and API are same-origin). A collision
+prints one actionable line and exits.
+
+For development with hot reload use `pnpm dev` (Vite on
+`http://localhost:5173` proxying `/api` to `127.0.0.1:8787` — that pairing
+does require 8787 to be free).
 
 | Command             | What it does                                                          |
 | ------------------- | --------------------------------------------------------------------- |
+| `pnpm start`        | build + single-process server on `127.0.0.1:8787` (or `PORT=<n>`)     |
 | `pnpm dev`          | tsx-watch server + Vite dev server (proxies `/api`)                   |
 | `pnpm build`        | Production bundle to `dist/` (the server then serves it with the API) |
 | `pnpm test`         | vitest full suite with coverage (node + jsdom projects)               |
