@@ -153,10 +153,47 @@ interface Call {
   body?: Record<string, unknown>;
 }
 
+/** The AT-1 shape: exactly the 4 bundled presets (server asset tested WU-A). */
+const TEMPLATES_REPLY = {
+  status: 200,
+  body: {
+    templates: [
+      {
+        id: 'reviewer',
+        label: 'Reviewer',
+        description: 'Code review',
+        prompt: '# Reviewer\nYou review code changes for correctness first.',
+      },
+      {
+        id: 'executor',
+        label: 'Executor',
+        description: 'Task delivery',
+        prompt:
+          '# Executor\nYou implement exactly the assigned task and nothing else.',
+      },
+      {
+        id: 'orchestrator',
+        label: 'Orchestrator',
+        description: 'Coordination',
+        prompt:
+          '# Orchestrator\nYou coordinate work; you do not implement it yourself.',
+      },
+      {
+        id: 'blank',
+        label: 'Blank',
+        description: 'Stub',
+        prompt: '# New agent\nThis agent has no custom instructions yet.',
+      },
+    ],
+  },
+};
+
 /**
  * Scripted fetch (WU6/WU7 pattern): GET /api/config replays the queue
  * (sticky last), PUT /api/agents/:name/model consumes its queue and fails
  * loudly when exhausted — a stray request can never pass unnoticed.
+ * WU-B adds the create-flow lanes: templates (sticky) plus fail-loud queues
+ * for the prompt-resolve GET and the POST /api/agents create.
  */
 function scriptApi(
   opts: {
@@ -164,12 +201,21 @@ function scriptApi(
     puts?: { status: number; body: unknown }[];
     /** WU9 — queued replies for POST /api/sync (fails loud when exhausted). */
     syncs?: { status: number; body: unknown }[];
+    /** WU-B — GET /api/templates (sticky single reply by default). */
+    templates?: { status: number; body: unknown }[];
+    /** WU-B — GET /api/agents/:name/prompt queue (fails loud when exhausted). */
+    prompts?: { status: number; body: unknown }[];
+    /** WU-B — POST /api/agents queue (fails loud when exhausted). */
+    creates?: { status: number; body: unknown }[];
   } = {},
 ) {
   const calls: Call[] = [];
   const gets = [...(opts.gets ?? [fixture(sampleAgents())])];
   const puts = [...(opts.puts ?? [])];
   const syncs = [...(opts.syncs ?? [])];
+  const templates = [...(opts.templates ?? [TEMPLATES_REPLY])];
+  const prompts = [...(opts.prompts ?? [])];
+  const creates = [...(opts.creates ?? [])];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -196,6 +242,21 @@ function scriptApi(
       if (method === 'POST' && url === '/api/sync') {
         const reply = syncs.shift();
         if (!reply) throw new Error('POST /api/sync script exhausted');
+        return json(reply.status, reply.body);
+      }
+      if (method === 'GET' && url === '/api/templates') {
+        const reply = templates.length > 1 ? templates.shift() : templates[0];
+        if (!reply) throw new Error('GET /api/templates script exhausted');
+        return json(reply.status, reply.body);
+      }
+      if (method === 'GET' && /^\/api\/agents\/[^/]+\/prompt$/.test(url)) {
+        const reply = prompts.shift();
+        if (!reply) throw new Error(`GET prompt script exhausted at ${url}`);
+        return json(reply.status, reply.body);
+      }
+      if (method === 'POST' && url === '/api/agents') {
+        const reply = creates.shift();
+        if (!reply) throw new Error('POST /api/agents script exhausted');
         return json(reply.status, reply.body);
       }
       return json(404, {
@@ -383,27 +444,67 @@ describe('Orchestration — pickers are limited to the installed catalog (OA-2)'
   });
 });
 
-describe('Orchestration — prompts and gentle-ai:* markers are read-only (OA-4)', () => {
-  it('renders prompt bodies and markers as visible, labeled read-only content', async () => {
-    scriptApi();
+describe('Orchestration — prompts open a reader modal, cells stay picker-only (OA-4, D8)', () => {
+  it('cells carry a view-prompt trigger and marker chips, never prompt bodies (WU-B D8)', async () => {
+    scriptApi({
+      prompts: [
+        {
+          status: 200,
+          body: {
+            name: 'explore',
+            source: 'inline',
+            prompt: 'Explore prompt body — synthetic.',
+          },
+        },
+      ],
+    });
     await rendered();
-    // Prompt bodies (non-phase rows and a matrix cell) are shown verbatim.
-    expect(screen.getByText(/Explore prompt body — synthetic\./)).toBeTruthy();
-    expect(screen.getByText(/Design prompt body\./)).toBeTruthy();
-    // Marker blocks inside prompts, and a structured gentle-ai:* key.
-    expect(screen.getByText(/<gentle-ai:sdd-model-assignments>/)).toBeTruthy();
+    // No prompt body or marker block renders inside any cell (reader-only).
+    expect(screen.queryByText(/Explore prompt body — synthetic\./)).toBeNull();
+    expect(screen.queryByText(/Design prompt body\./)).toBeNull();
+    expect(screen.queryByText(/<gentle-ai:sdd-model-assignments>/)).toBeNull();
+    // The structured gentle-ai:* key survives as a labeled read-only chip,
+    // with NO value content rendered into the cell.
+    const generalRow = within(otherTable()).getByRole('row', {
+      name: 'general',
+    });
     expect(
-      within(
-        within(otherTable()).getByRole('row', { name: 'general' }),
-      ).getByText(/gentle-ai:sdd-model-assignments/),
+      within(generalRow).getByText('gentle-ai:sdd-model-assignments'),
     ).toBeTruthy();
-    // Every one of them is labeled read-only, and nothing editable exists.
-    expect(screen.getAllByText('read-only').length).toBeGreaterThanOrEqual(3);
+    expect(within(generalRow).getByText('read-only')).toBeTruthy();
+    expect(generalRow.querySelectorAll('pre').length).toBe(0);
+    // Exactly the 3 agents with a prompt body expose the trigger.
+    expect(screen.getAllByRole('button', { name: 'view prompt' }).length).toBe(
+      3,
+    );
+    const jdRow = within(otherTable()).getByRole('row', {
+      name: 'jd-judge-a',
+    });
+    expect(
+      within(jdRow).queryByRole('button', { name: 'view prompt' }),
+    ).toBeNull();
+    // Every picker is still a model combobox; the table itself has no editors.
     expect(screen.queryAllByRole('textbox').length).toBe(0);
     expect(document.querySelectorAll('textarea').length).toBe(0);
     for (const p of screen.getAllByRole('combobox')) {
       expect(String(p.getAttribute('aria-label'))).toMatch(/ model$/);
     }
+    // "view prompt" opens the read-only reader with the FULL content.
+    const exploreRow = within(otherTable()).getByRole('row', {
+      name: 'explore',
+    });
+    fireEvent.click(
+      within(exploreRow).getByRole('button', { name: 'view prompt' }),
+    );
+    const reader = await screen.findByRole('dialog', {
+      name: 'explore prompt',
+    });
+    expect(
+      within(reader).getByText('Explore prompt body — synthetic.'),
+    ).toBeTruthy();
+    expect(reader.querySelectorAll('textarea, input').length).toBe(0);
+    fireEvent.click(within(reader).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('never sends prompt or marker content in any save call', async () => {
@@ -627,6 +728,114 @@ describe('Orchestration — empty state (0..N)', () => {
     render(<OrchestrationView />);
     expect(await screen.findByText('No agents declared')).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
+    // WU-B: the create CTA is available even with zero agents (bootstrap).
+    expect(screen.getByRole('button', { name: 'Create agent' })).toBeTruthy();
+  });
+});
+
+describe('Orchestration — create flow: CTA, AC-8 placement, reader XSS (WU-B)', () => {
+  async function openCreate() {
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+    const dlg = await screen.findByRole('dialog', { name: 'New agent' });
+    // Presets arrived (AT-1) before any selection is scripted.
+    await within(dlg).findByText('Reviewer');
+    return dlg;
+  }
+  const createCalls = (calls: Call[]) =>
+    calls.filter((c) => c.method === 'POST' && c.url === '/api/agents');
+
+  it('the header CTA opens the New agent modal and fetches the presets once', async () => {
+    const { calls } = scriptApi();
+    await rendered();
+    const dlg = await openCreate();
+    expect(within(dlg).getByLabelText('Name')).toBeTruthy();
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/templates')
+        .length,
+    ).toBe(1);
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Close' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New agent' })).toBeNull(),
+    );
+    expect(within(matrixTable()).getAllByRole('combobox').length).toBe(30);
+  });
+
+  it('a template create closes the modal, re-reads CONFIG and the agent lands as a generic list row (AC-8, AC-9, CX-3)', async () => {
+    const after = fixture(
+      sampleAgents({
+        'my-helper': {
+          description: 'created via dashboard',
+          prompt: '# New agent\nThis agent has no custom instructions yet.',
+        },
+      }),
+    );
+    after.hash = 'hash-post-create';
+    const { calls } = scriptApi({
+      gets: [fixture(sampleAgents()), after],
+      creates: [{ status: 200, body: { ok: true, hash: 'hash-post-create' } }],
+    });
+    await rendered();
+    const dlg = await openCreate();
+    fireEvent.change(within(dlg).getByLabelText('Name'), {
+      target: { value: 'my-helper' },
+    });
+    fireEvent.change(within(dlg).getByLabelText('Prompt source'), {
+      target: { value: 'template:blank' },
+    });
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Create' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'New agent' })).toBeNull(),
+    );
+    // AC-8: generic derivation places the lone agent as a list row — the
+    // view logic is untouched, the reloaded CONFIG is the only input.
+    const row = within(otherTable()).getByRole('row', { name: 'my-helper' });
+    expect(row).toBeTruthy();
+    expect(picker('my-helper').value).toBe('');
+    const post = createCalls(calls)[0];
+    expect(post.body).toEqual({
+      hash: 'hash-base-0001',
+      name: 'my-helper',
+      agent: {
+        prompt: '# New agent\nThis agent has no custom instructions yet.',
+      },
+    });
+    // CX-3 restart notice applies after create; CONFIG was re-read once.
+    expect(screen.getByText('Restart OpenCode to apply')).toBeTruthy();
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config').length,
+    ).toBe(2);
+  });
+
+  it('an evil cloned prompt is inert in the reader modal (XSS threat, text node only)', async () => {
+    const evil = `<script>alert('xss')</script>`;
+    scriptApi({
+      gets: [fixture(sampleAgents({ 'evil-xss': { prompt: evil } }))],
+      prompts: [
+        {
+          status: 200,
+          body: { name: 'evil-xss', source: 'inline', prompt: evil },
+        },
+      ],
+    });
+    vi.stubGlobal(
+      'alert',
+      vi.fn(() => true),
+    );
+    await rendered();
+    const row = within(otherTable()).getByRole('row', { name: 'evil-xss' });
+    expect(
+      within(row).getByRole('button', { name: 'view prompt' }),
+    ).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'view prompt' }));
+    const reader = await screen.findByRole('dialog', {
+      name: 'evil-xss prompt',
+    });
+    // The payload is visible as literal text…
+    expect(within(reader).getByText(evil)).toBeTruthy();
+    // …and NOTHING executed: zero script nodes, alert never called.
+    expect(document.querySelectorAll('script').length).toBe(0);
+    expect(vi.mocked(alert)).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 

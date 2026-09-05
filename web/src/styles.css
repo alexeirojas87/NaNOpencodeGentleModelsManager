@@ -554,14 +554,19 @@ code {
   font-style: italic;
 }
 
+/* orchestration-v2 WU-B: read-only cell — picker + view-prompt button +
+   gentle-ai:* marker chips. Token-only layout; theming is finalized in WU-C. */
 .ro-extras {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 6px;
 }
 
-.ro-block summary {
-  color: var(--muted);
-  cursor: pointer;
+.ro-extras .btn {
   font-size: 12px;
+  padding: 3px 10px;
 }
 
 .ro-flag {
@@ -573,16 +578,63 @@ code {
   white-space: nowrap;
 }
 
-.ro-block pre {
+/* Create + reader modals (WU-B, D5/D9/D10). */
+.view-header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.view-header .btn-primary {
+  margin-left: auto;
+}
+
+.create-form {
+  display: grid;
+  gap: 12px;
+}
+
+.create-form label {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.create-form input,
+.create-form select {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 9px;
+  width: 100%;
+}
+
+.prompt-area {
+  margin: 0;
+}
+
+.prompt-preview {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
   font-size: 12px;
-  margin: 6px 0 0;
-  max-height: 180px;
+  margin: 0;
+  max-height: 240px;
   overflow: auto;
   padding: 8px 10px;
   white-space: pre-wrap;
+}
+
+.field-error {
+  color: var(--accent);
+  font-size: 12px;
+  margin: 4px 0 0;
 }
 
 /* --- sync panel (WU9, OA-3) ------------------------------------------------- */

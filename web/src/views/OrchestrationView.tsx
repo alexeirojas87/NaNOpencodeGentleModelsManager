@@ -26,6 +26,8 @@ import {
   type ConflictInfo,
   type ConflictRow,
 } from '../components/ConflictModal';
+import { CreateAgentModal } from '../components/CreateAgentModal';
+import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
 
@@ -244,33 +246,39 @@ function ModelPicker({
 }
 
 /**
- * Read-only surface (OA-4): prompt bodies (which may embed
- * <gentle-ai:...> marker blocks) and structured `gentle-ai:*` keys are
- * displayed verbatim and labeled read-only — the view offers no control
- * over them and no write ever carries their content.
+ * Cell surface (OA-4, design D8 — WU-B): picker-only cell plus a
+ * "view prompt" trigger and gentle-ai:* marker chips. The prompt body NEVER
+ * renders inside the cell (the full text lives in the read-only
+ * PromptReaderModal, fetched fresh from the server — inline or {file:}
+ * materialized), and markers show their key name as a labeled read-only
+ * chip only — values never enter the DOM. No write ever carries either.
  */
-function ReadOnlyExtras({ entry }: { entry: AgentConfigEntry }) {
-  const prompt = typeof entry.prompt === 'string' ? entry.prompt : null;
+function PromptCell({
+  agentName,
+  entry,
+  onRead,
+}: {
+  agentName: string;
+  entry: AgentConfigEntry;
+  onRead: (name: string) => void;
+}) {
+  const hasPrompt = typeof entry.prompt === 'string' && entry.prompt.length > 0;
   const markers = Object.keys(entry).filter((key) =>
     key.startsWith('gentle-ai:'),
   );
-  if (prompt === null && markers.length === 0) return null;
+  if (!hasPrompt && markers.length === 0) return null;
   return (
     <div className="ro-extras">
-      {prompt !== null && (
-        <details className="ro-block">
-          <summary>
-            prompt · <span className="ro-flag">read-only</span>
-          </summary>
-          <pre className="mono">{prompt}</pre>
-        </details>
+      {hasPrompt && (
+        <button type="button" className="btn" onClick={() => onRead(agentName)}>
+          view prompt
+        </button>
       )}
       {markers.map((key) => (
-        <div key={key} className="ro-block">
+        <span key={key} className="chip">
           <span className="mono">{key}</span>{' '}
           <span className="ro-flag">read-only</span>
-          <pre className="mono">{JSON.stringify(entry[key], null, 2)}</pre>
-        </div>
+        </span>
       ))}
     </div>
   );
@@ -285,6 +293,9 @@ export default function OrchestrationView() {
   const [syncAdvisory, setSyncAdvisory] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<ConflictInfo | null>(null);
+  // orchestration-v2 WU-B: the two read/write surfaces this view hosts.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [reader, setReader] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -336,16 +347,42 @@ export default function OrchestrationView() {
     return <p className="muted">Loading configuration…</p>;
   }
 
+  // Shared create-success handling: close, re-read CONFIG (AC-9) and raise
+  // the CX-3 restart notice. The generic derivation places the new agent.
+  const agentCreated = () => {
+    setCreateOpen(false);
+    setRestartRequired(true);
+    void reload();
+  };
+  const createModal = createOpen && (
+    <CreateAgentModal
+      base={base}
+      onClose={() => setCreateOpen(false)}
+      onCreated={agentCreated}
+      onAdoptFresh={(fresh) => setBase(fresh)}
+    />
+  );
+
   const agentNames = Object.keys(base.agents);
   if (agentNames.length === 0) {
     return (
       <div className="panel">
-        <h2>Orchestration</h2>
+        <div className="card-header">
+          <h2>Orchestration</h2>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setCreateOpen(true)}
+          >
+            Create agent
+          </button>
+        </div>
         <p className="muted">No agents declared</p>
         <p className="muted">
           Agent assignments appear here as soon as CONFIG declares them under
-          <code> agent.*</code>.
+          <code> agent.*</code> — or create the first one.
         </p>
+        {createModal}
       </div>
     );
   }
@@ -384,9 +421,18 @@ export default function OrchestrationView() {
               (default agent: <code className="mono">{base.defaultAgent}</code>)
             </>
           ) : null}
-          . Pickers list only installed provider/model pairs; prompt bodies and{' '}
-          <code className="mono">gentle-ai:*</code> markers are read-only.
+          . Pickers list only installed provider/model pairs; prompt bodies open
+          in a read-only reader and <code className="mono">gentle-ai:*</code>{' '}
+          markers stay read-only chips.
         </p>
+        {/* AC-9: the create entry point — a modal, never a table mutation. */}
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setCreateOpen(true)}
+        >
+          Create agent
+        </button>
       </header>
 
       {restartRequired && (
@@ -445,7 +491,11 @@ export default function OrchestrationView() {
                       {name ? (
                         <>
                           {pickerNode(name)}
-                          <ReadOnlyExtras entry={base.agents[name]} />
+                          <PromptCell
+                            agentName={name}
+                            entry={base.agents[name]}
+                            onRead={setReader}
+                          />
                         </>
                       ) : (
                         <span>agent absent</span>
@@ -477,7 +527,11 @@ export default function OrchestrationView() {
                 </th>
                 <td>{pickerNode(name)}</td>
                 <td>
-                  <ReadOnlyExtras entry={base.agents[name]} />
+                  <PromptCell
+                    agentName={name}
+                    entry={base.agents[name]}
+                    onRead={setReader}
+                  />
                 </td>
               </tr>
             ))}
@@ -523,6 +577,11 @@ export default function OrchestrationView() {
             void commit(target);
           }}
         />
+      )}
+
+      {createModal}
+      {reader && (
+        <PromptReaderModal agentName={reader} onClose={() => setReader(null)} />
       )}
     </div>
   );

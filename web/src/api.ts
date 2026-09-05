@@ -6,11 +6,14 @@
 // reads the Models view needs. DTOs are the shared contracts from
 // shared/types.ts, never redeclared here.
 import type {
+  AgentPromptResponse,
   CatalogResponse,
   ConfigResponse,
+  CreateAgentRequest,
   ModelConfig,
   StatusResponse,
   SyncResponse,
+  TemplatesResponse,
   WriteResponse,
 } from '../../shared/types';
 
@@ -192,4 +195,35 @@ export function runSync(args?: string[]): Promise<SyncResponse> {
     '/api/sync',
     args === undefined ? {} : { args },
   ) as Promise<SyncResponse>;
+}
+
+/**
+ * orchestration-v2 WU-B — agent create flow (server endpoints shipped WU-A).
+ * POST /api/agents is CREATE-ONLY (SCW-7 set-only row): the body is exactly
+ * {hash, name, agent:{model?, description?, prompt}} (AC-1) and only ever
+ * carries materialized inline text — a `{file:…}` ref is rejected upstream
+ * (AC-5) and clone flows go through getAgentPrompt first (AT-2). Every D2
+ * gate 400 arrives as an ApiError whose `code` routes to the offending form
+ * field (D9); staleness rides the established 409 {expected, actual} shape.
+ */
+export function createAgent(req: CreateAgentRequest): Promise<WriteResponse> {
+  return request('POST', '/api/agents', req) as Promise<WriteResponse>;
+}
+
+/** GET /api/templates — the 4 bundled presets, read-only and offline (AT-1). */
+export function getTemplates(): Promise<TemplatesResponse> {
+  return request('GET', '/api/templates') as Promise<TemplatesResponse>;
+}
+
+/**
+ * GET /api/agents/:name/prompt — read-only materialization (D4). Inline
+ * prompts pass through verbatim; `{file:…}` refs resolve server-side with
+ * containment + the 64 KiB cap and everything unresolvable fails closed as
+ * 404. Used by the create modal's clone prefill AND the prompt reader.
+ */
+export function getAgentPrompt(name: string): Promise<AgentPromptResponse> {
+  return request(
+    'GET',
+    `/api/agents/${encodeURIComponent(name)}/prompt`,
+  ) as Promise<AgentPromptResponse>;
 }
