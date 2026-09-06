@@ -43,6 +43,7 @@ import { PromptEditorModal } from '../components/PromptEditorModal';
 import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
+import { AssignmentsPanel } from '../components/assignments/AssignmentsPanel';
 
 /** Pending user choice per agent: string = set, null = clear, absent = untouched. */
 type Edits = Record<string, string | null>;
@@ -549,6 +550,20 @@ export default function OrchestrationView() {
   };
 
   const pickerNode = (agentName: string) => {
+    // role-model-assignment WU-4 (S10): gentle-ai-owned rows (isReserved —
+    // sdd-*, jd-*, review-*, general, explore, gentle-orchestrator) lose the
+    // direct ModelPicker. A direct agent.<name>.model write is OUTSIDE the
+    // native assignment mechanism: sync deep-merges reserved agents and
+    // would revert the foreign write (dual-truth desync). Their declared
+    // model renders as read-only mono text; assignment flows through the
+    // AssignmentsPanel's POST /api/sync (native --profile-phase/--profile).
+    // User-owned rows are untouched (S11).
+    if (!isUserOwned(agentName)) {
+      const declared = declaredModel(base.agents[agentName]);
+      return (
+        <span className="mono ro-model">{declared ?? 'runtime default'}</span>
+      );
+    }
     // An explicit clear is edits[name] === null — existence, not ??, marks
     // the pending state (null is a legitimate pending value).
     const edit = agentName in edits ? (edits[agentName] ?? '') : undefined;
@@ -817,9 +832,20 @@ export default function OrchestrationView() {
 
       {/* WU9 (OA-3): the sync action the advisory above points at. A
           successful run reloads CONFIG through the generic reload path, so
-          the matrix and list reflect whatever gentle-ai sync wrote. */}
+          the matrix and list reflect whatever gentle-ai sync wrote.
+          role-model-assignment WU-5: the native assignments panel mounts
+          beside it — its Apply composes ONE sync with --profile-phase/
+          --profile flags and shares the SAME reload path (advisory cleared,
+          CONFIG re-GET). */}
       <section className="orch-section">
         <SyncPanel
+          onSynced={() => {
+            setSyncAdvisory(false);
+            void reload();
+          }}
+        />
+        <AssignmentsPanel
+          base={base}
           onSynced={() => {
             setSyncAdvisory(false);
             void reload();

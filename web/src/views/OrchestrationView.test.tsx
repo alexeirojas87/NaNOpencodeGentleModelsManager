@@ -356,29 +356,32 @@ afterEach(() => {
 });
 
 describe('Orchestration — matrix and list derived generically from agent.* (OA-1)', () => {
-  it('renders the base/-cheap/-deep matrix as exactly 30 cells', async () => {
+  it('renders the base/-cheap/-deep matrix as exactly 30 gated cells', async () => {
     scriptApi();
     await rendered();
     const matrix = within(matrixTable());
-    // 10 families × 3 columns = 30 pickers; header + 10 rows.
-    expect(matrix.getAllByRole('combobox').length).toBe(30);
+    // 10 families × 3 columns = 30 cells; header + 10 rows. WU-4: the whole
+    // fixture is gentle-ai-owned, so every cell is read-only text — the
+    // DERIVATION is unchanged, only the cell surface is gated (S10).
+    expect(matrix.queryAllByRole('combobox')).toHaveLength(0);
     expect(matrix.getAllByRole('row').length).toBe(11);
     const specRow = matrix.getByRole('row', { name: 'sdd-spec' });
     expect(
-      within(specRow).getByRole('combobox', { name: 'sdd-spec-cheap model' }),
-    ).toBeTruthy();
-    expect(
-      within(specRow).getByRole('combobox', { name: 'sdd-spec-deep model' }),
-    ).toBeTruthy();
+      within(specRow).queryByRole('combobox', { name: 'sdd-spec-cheap model' }),
+    ).toBeNull();
+    expect(within(specRow).getAllByText('runtime default').length).toBe(2);
+    expect(within(specRow).getByText('nan/qwen3.8-flash')).toBeTruthy();
   });
 
   it('lists the 14 non-phase agents, including orphan -cheap/-deep variants', async () => {
     scriptApi();
     await rendered();
     const others = within(otherTable());
-    // header + 14 rows; every row is an agent, every agent gets a picker.
+    // header + 14 rows; every row is an agent — WU-4 gates them all here
+    // (the fixture's others are all gentle-ai-owned), so read-only text
+    // replaces the pickers.
     expect(others.getAllByRole('row').length).toBe(15);
-    expect(others.getAllByRole('combobox').length).toBe(14);
+    expect(others.queryAllByRole('combobox')).toHaveLength(0);
     for (const name of [
       'sdd-orchestrator-cheap',
       'sdd-orchestrator-deep',
@@ -406,9 +409,21 @@ describe('Orchestration — matrix and list derived generically from agent.* (OA
     await rendered();
     const others = within(otherTable());
     expect(others.getAllByRole('row').length).toBe(16);
-    expect(picker('review-doc-integrity')).toBeTruthy();
+    // WU-4: the new row is review-* (reserved) — it renders read-only, and
+    // the generic derivation is otherwise unchanged.
+    expect(
+      others.getByRole('row', { name: 'review-doc-integrity' }),
+    ).toBeTruthy();
+    expect(
+      others.queryByRole('combobox', { name: 'review-doc-integrity model' }),
+    ).toBeNull();
+    expect(
+      within(
+        others.getByRole('row', { name: 'review-doc-integrity' }),
+      ).getByText('runtime default'),
+    ).toBeTruthy();
     // Still 30 matrix cells — the lone agent cannot form a family row.
-    expect(within(matrixTable()).getAllByRole('combobox').length).toBe(30);
+    expect(within(matrixTable()).getAllByRole('row').length).toBe(11);
   });
 
   it('derives a brand-new family row from unseen names; the missing cell renders absent', async () => {
@@ -425,8 +440,9 @@ describe('Orchestration — matrix and list derived generically from agent.* (OA
     await rendered();
     const matrix = within(matrixTable());
     expect(matrix.getAllByRole('row').length).toBe(12); // header + 11
-    // base + cheap cells are pickers; the -deep cell has no agent behind it.
-    expect(matrix.getAllByRole('combobox').length).toBe(32);
+    // WU-4: the reserved cells are gated; only the user-owned
+    // quantum-phase base/cheap pickers remain active.
+    expect(matrix.getAllByRole('combobox').length).toBe(2);
     const row = matrix.getByRole('row', { name: 'quantum-phase' });
     expect(within(row).getByText('agent absent')).toBeTruthy();
     expect(
@@ -434,34 +450,60 @@ describe('Orchestration — matrix and list derived generically from agent.* (OA
     ).toBeNull();
   });
 
-  it('shows "runtime default" for unset agents and the pair for the 4 explicit ones', async () => {
+  it('shows "runtime default" for unset agents and the declared pairs for the 4 explicit ones', async () => {
     scriptApi();
     await rendered();
-    expect(picker('sdd-spec').value).toBe('');
-    expect(selectedText(picker('sdd-spec'))).toBe('runtime default');
-    expect(picker('sdd-spec-deep').value).toBe('nan/qwen3.8-flash');
-    expect(picker('sdd-tasks-deep').value).toBe('nan/qwen3.8-flash');
-    expect(picker('sdd-orchestrator-cheap').value).toBe('nan/qwen3.8-flash');
-    expect(picker('sdd-orchestrator-deep').value).toBe('nanSendvalu/glm5.3');
-    // Exactly the 4 fixture agents are explicit; all 40 others default.
-    const all = screen.getAllByRole('combobox');
+    // WU-4: the fixture is all-reserved, so values surface as read-only
+    // text — the declared/defaults truth is unchanged (S10).
+    const specRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-spec',
+    });
+    expect(within(specRow).getAllByText('runtime default').length).toBe(2);
+    expect(within(specRow).getByText('nan/qwen3.8-flash')).toBeTruthy();
     expect(
-      all.filter((p) => (p as HTMLSelectElement).value !== '').length,
-    ).toBe(4);
+      within(
+        within(matrixTable()).getByRole('row', { name: 'sdd-tasks' }),
+      ).getByText('nan/qwen3.8-flash'),
+    ).toBeTruthy();
+    expect(
+      within(
+        within(otherTable()).getByRole('row', {
+          name: 'sdd-orchestrator-cheap',
+        }),
+      ).getByText('nan/qwen3.8-flash'),
+    ).toBeTruthy();
+    expect(
+      within(
+        within(otherTable()).getByRole('row', {
+          name: 'sdd-orchestrator-deep',
+        }),
+      ).getByText('nanSendvalu/glm5.3'),
+    ).toBeTruthy();
   });
 });
 
 describe('Orchestration — pickers are limited to the installed catalog (OA-2)', () => {
   it('offers only provider/model pairs present in the config response', async () => {
-    scriptApi();
+    // WU-4: picker behavior is pinned on user-owned rows (reserved rows are
+    // gated read-only); the catalog rule itself is unchanged.
+    scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'my-helper': { description: 'd' },
+            'my-assistant': { description: 'd' },
+          }),
+        ),
+      ],
+    });
     await rendered();
-    for (const name of ['sdd-spec', 'sdd-apply-cheap', 'gentle-orchestrator']) {
+    for (const name of ['my-helper', 'my-assistant']) {
       expect(optionValues(picker(name))).toEqual(['', ...INSTALLED_PAIRS]);
     }
     // headroom declares ZERO models → no headroom option anywhere;
     // uninstalled pairs are simply not offered.
-    for (const p of screen.getAllByRole('combobox')) {
-      const values = optionValues(p as HTMLSelectElement);
+    for (const name of ['my-helper', 'my-assistant']) {
+      const values = optionValues(picker(name));
       expect(values.some((v) => v.startsWith('headroom/'))).toBe(false);
       expect(values).not.toContain('nan/not-installed');
     }
@@ -472,13 +514,14 @@ describe('Orchestration — pickers are limited to the installed catalog (OA-2)'
       gets: [
         fixture(
           sampleAgents({
-            'sdd-propose-deep': { model: 'ghostly/missing-1' },
+            'my-helper': { description: 'd', model: 'ghostly/missing-1' },
+            'my-assistant': { description: 'd' },
           }),
         ),
       ],
     });
     await rendered();
-    const stale = picker('sdd-propose-deep');
+    const stale = picker('my-helper');
     expect(stale.value).toBe('ghostly/missing-1');
     // It is displayed for THIS agent without leaking into other pickers.
     expect(optionValues(stale)).toEqual([
@@ -486,7 +529,10 @@ describe('Orchestration — pickers are limited to the installed catalog (OA-2)'
       'ghostly/missing-1',
       ...INSTALLED_PAIRS,
     ]);
-    expect(optionValues(picker('sdd-spec'))).toEqual(['', ...INSTALLED_PAIRS]);
+    expect(optionValues(picker('my-assistant'))).toEqual([
+      '',
+      ...INSTALLED_PAIRS,
+    ]);
   });
 });
 
@@ -529,17 +575,21 @@ describe('Orchestration — prompts open a reader modal, cells stay picker-only 
     expect(
       within(jdRow).queryByRole('button', { name: 'view prompt' }),
     ).toBeNull();
-    // Every picker is still a model combobox; the table itself has no editors.
+    // WU-4: the tables hold NO editors at all — the fixture's agents are all
+    // gentle-ai-owned, so every cell is read-only text (no combobox to sweep).
     expect(screen.queryAllByRole('textbox').length).toBe(0);
     expect(document.querySelectorAll('textarea').length).toBe(0);
-    for (const p of screen.getAllByRole('combobox')) {
-      // WU-4 adds exactly one non-model combobox: the header AP-7 default
-      // agent picker (aria-label 'Default agent'). Tables stay picker-only —
-      // the original intent of this sweep is unchanged.
-      expect(String(p.getAttribute('aria-label'))).toMatch(
-        / model$|^Default agent$/,
-      );
-    }
+    expect(within(matrixTable()).queryAllByRole('combobox')).toHaveLength(0);
+    expect(within(otherTable()).queryAllByRole('combobox')).toHaveLength(0);
+    // The only active combobox outside modals is the header AP-7 default
+    // agent picker — tables stay editor-free.
+    expect(
+      String(
+        screen
+          .getByRole('combobox', { name: 'Default agent' })
+          .getAttribute('aria-label'),
+      ),
+    ).toMatch(/^Default agent$/);
     // "view prompt" opens the read-only reader with the FULL content.
     const exploreRow = within(otherTable()).getByRole('row', {
       name: 'explore',
@@ -559,12 +609,28 @@ describe('Orchestration — prompts open a reader modal, cells stay picker-only 
   });
 
   it('never sends prompt or marker content in any save call', async () => {
+    // WU-4: the save flow is pinned on user-owned agents (reserved rows are
+    // gated); the wire contract is unchanged.
     const { calls } = scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'my-helper': {
+              description: 'd',
+              prompt: 'Helper prompt.',
+            },
+            'my-assistant': {
+              description: 'd',
+              'gentle-ai:sdd-model-assignments': { 'my-helper': 'nan/qwen3.6' },
+            },
+          }),
+        ),
+      ],
       puts: [okWrite('echo-A'), okWrite('echo-B')],
     });
     await rendered();
-    setModel('sdd-spec', 'nan/qwen3.6');
-    setModel('gentle-orchestrator', 'nan/mimo-v2.5');
+    setModel('my-helper', 'nan/qwen3.6');
+    setModel('my-assistant', 'nan/mimo-v2.5');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByText('Restart OpenCode to apply');
     const w = writes(calls);
@@ -583,10 +649,21 @@ describe('Orchestration — prompts open a reader modal, cells stay picker-only 
 });
 
 describe('Orchestration — set/clear saves through PUT /api/agents/:name/model (OA-2, OA-3)', () => {
+  // WU-4: reserved rows are gated, so the direct-PUT save flows are pinned
+  // on user-owned agents — their picker semantics are UNCHANGED (S11).
+  const ownedAgents = () =>
+    sampleAgents({
+      'my-helper': { description: 'standalone' },
+      'my-assistant': { description: 'standalone', model: 'nan/qwen3.8-flash' },
+    });
+
   it('sets a model, chains the echoed hash, and advises running gentle-ai sync', async () => {
-    const { calls } = scriptApi({ puts: [okWrite('echo-A')] });
+    const { calls } = scriptApi({
+      gets: [fixture(ownedAgents())],
+      puts: [okWrite('echo-A')],
+    });
     await rendered();
-    setModel('sdd-spec', 'nan/qwen3.6');
+    setModel('my-helper', 'nan/qwen3.6');
     expect(screen.getByText('1 change')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     // CX-3 restart notice + the OA-3 advisory (text only — sync ships WU9).
@@ -595,67 +672,80 @@ describe('Orchestration — set/clear saves through PUT /api/agents/:name/model 
       screen.getByText(/run gentle-ai sync to refresh prompt table/),
     ).toBeTruthy();
     const put = writes(calls)[0];
-    expect(put.url).toBe('/api/agents/sdd-spec/model');
+    expect(put.url).toBe('/api/agents/my-helper/model');
     expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
-    expect(picker('sdd-spec').value).toBe('nan/qwen3.6');
+    expect(picker('my-helper').value).toBe('nan/qwen3.6');
     expect(screen.getByText('No changes')).toBeTruthy();
   });
 
   it('clearing an assignment PUTs null and the row falls back to runtime default', async () => {
-    const { calls } = scriptApi({ puts: [okWrite('echo-X')] });
+    const { calls } = scriptApi({
+      gets: [fixture(ownedAgents())],
+      puts: [okWrite('echo-X')],
+    });
     await rendered();
-    expect(picker('sdd-spec-deep').value).toBe('nan/qwen3.8-flash');
-    setModel('sdd-spec-deep', '');
+    expect(picker('my-assistant').value).toBe('nan/qwen3.8-flash');
+    setModel('my-assistant', '');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByText('Restart OpenCode to apply');
     expect(writes(calls)[0].body).toEqual({
       hash: 'hash-base-0001',
       model: null,
     });
-    expect(picker('sdd-spec-deep').value).toBe('');
-    expect(selectedText(picker('sdd-spec-deep'))).toBe('runtime default');
+    expect(picker('my-assistant').value).toBe('');
+    expect(selectedText(picker('my-assistant'))).toBe('runtime default');
   });
 
   it('flushes multiple agent edits sequentially, chaining every echoed hash', async () => {
     const { calls } = scriptApi({
+      gets: [fixture(ownedAgents())],
       puts: [okWrite('echo-A'), okWrite('echo-B')],
     });
     await rendered();
-    setModel('sdd-spec', 'nan/mimo-v2.5');
-    setModel('general', 'nan/qwen3.6');
+    setModel('my-helper', 'nan/mimo-v2.5');
+    setModel('my-assistant', 'nan/qwen3.6');
     expect(screen.getByText('2 changes')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByText('Restart OpenCode to apply');
     const w = writes(calls);
     expect(w.length).toBe(2);
-    expect(w[0].url).toBe('/api/agents/sdd-spec/model');
+    expect(w[0].url).toBe('/api/agents/my-helper/model');
     expect(w[0].body).toEqual({
       hash: 'hash-base-0001',
       model: 'nan/mimo-v2.5',
     });
-    expect(w[1].url).toBe('/api/agents/general/model');
+    expect(w[1].url).toBe('/api/agents/my-assistant/model');
     expect(w[1].body).toEqual({ hash: 'echo-A', model: 'nan/qwen3.6' });
-    expect(picker('general').value).toBe('nan/qwen3.6');
+    expect(picker('my-assistant').value).toBe('nan/qwen3.6');
   });
 
   it('discarding pending picker changes restores the loaded values', async () => {
-    const { calls } = scriptApi();
+    const { calls } = scriptApi({ gets: [fixture(ownedAgents())] });
     await rendered();
-    setModel('sdd-spec', 'nan/qwen3.6');
-    setModel('sdd-spec-deep', '');
+    setModel('my-helper', 'nan/qwen3.6');
+    setModel('my-assistant', '');
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(screen.getByText('No changes')).toBeTruthy();
-    expect(picker('sdd-spec').value).toBe('');
-    expect(picker('sdd-spec-deep').value).toBe('nan/qwen3.8-flash');
+    expect(picker('my-helper').value).toBe('');
+    expect(picker('my-assistant').value).toBe('nan/qwen3.8-flash');
     expect(writes(calls).length).toBe(0);
   });
 });
 
 describe('Orchestration — conflict and validation reuse the established flows (SCW-2, SCW-3)', () => {
+  // WU-4: flows re-anchored on user-owned agents (reserved rows are gated);
+  // the SCW-2/SCW-3 mechanics are unchanged.
+  const ownedAgents = (extra?: Record<string, AgentConfigEntry>) =>
+    sampleAgents({
+      'my-helper': { description: 'standalone' },
+      'my-assistant': { description: 'standalone', model: 'nan/qwen3.8-flash' },
+      ...extra,
+    });
+
   it('409 opens the conflict diff; Reload fresh keeps the edit re-appliable on the new hash', async () => {
     const fresh = fixture(
-      sampleAgents({
-        'sdd-spec': { description: 'synthetic', model: 'nan/qwen3.8-flash' },
+      ownedAgents({
+        'my-helper': { description: 'standalone', model: 'nan/qwen3.8-flash' },
       }),
     );
     fresh.hash = 'hash-external-9';
@@ -672,16 +762,16 @@ describe('Orchestration — conflict and validation reuse the established flows 
       },
     };
     const { calls } = scriptApi({
-      gets: [fixture(sampleAgents()), fresh],
+      gets: [fixture(ownedAgents()), fresh],
       puts: [stale, okWrite('echo-F')],
     });
     await rendered();
-    setModel('sdd-spec', 'nan/qwen3.6');
+    setModel('my-helper', 'nan/qwen3.6');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     const dialog = await screen.findByRole('dialog', {
       name: 'Config conflict',
     });
-    expect(within(dialog).getByText('agent.sdd-spec.model')).toBeTruthy();
+    expect(within(dialog).getByText('agent.my-helper.model')).toBeTruthy();
     expect(within(dialog).getByText('hash-base-0001')).toBeTruthy();
     expect(within(dialog).getByText('hash-external-9')).toBeTruthy();
     expect(within(dialog).getByText('nan/qwen3.6')).toBeTruthy();
@@ -703,7 +793,7 @@ describe('Orchestration — conflict and validation reuse the established flows 
   });
 
   it('409 Overwrite retries the remaining write immediately with the fresh hash', async () => {
-    const fresh = fixture(sampleAgents());
+    const fresh = fixture(ownedAgents());
     fresh.hash = 'hash-external-9';
     const stale = {
       status: 409,
@@ -718,11 +808,11 @@ describe('Orchestration — conflict and validation reuse the established flows 
       },
     };
     const { calls } = scriptApi({
-      gets: [fixture(sampleAgents()), fresh],
+      gets: [fixture(ownedAgents()), fresh],
       puts: [stale, okWrite('echo-W')],
     });
     await rendered();
-    setModel('sdd-verify-cheap', 'nan/qwen3.6');
+    setModel('my-assistant', 'nan/qwen3.6');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     const dialog = await screen.findByRole('dialog', {
       name: 'Config conflict',
@@ -735,11 +825,12 @@ describe('Orchestration — conflict and validation reuse the established flows 
       hash: 'hash-external-9',
       model: 'nan/qwen3.6',
     });
-    expect(picker('sdd-verify-cheap').value).toBe('nan/qwen3.6');
+    expect(picker('my-assistant').value).toBe('nan/qwen3.6');
   });
 
   it('400 renders per-path issues in the save bar and keeps pending edits', async () => {
     const { calls } = scriptApi({
+      gets: [fixture(ownedAgents())],
       puts: [
         {
           status: 400,
@@ -750,7 +841,7 @@ describe('Orchestration — conflict and validation reuse the established flows 
               message: 'Validation failed.',
               issues: [
                 {
-                  path: 'agent.sdd-spec.model',
+                  path: 'agent.my-helper.model',
                   message: 'expected a "provider/model" string',
                 },
               ],
@@ -760,13 +851,13 @@ describe('Orchestration — conflict and validation reuse the established flows 
       ],
     });
     await rendered();
-    setModel('sdd-spec', 'nan/qwen3.6');
+    setModel('my-helper', 'nan/qwen3.6');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(
-      await screen.findByText(/agent\.sdd-spec\.model: expected a/),
+      await screen.findByText(/agent\.my-helper\.model: expected a/),
     ).toBeTruthy();
     // Pending edits survive; no success state, no advisory.
-    expect(picker('sdd-spec').value).toBe('nan/qwen3.6');
+    expect(picker('my-helper').value).toBe('nan/qwen3.6');
     expect(screen.queryByText('Restart OpenCode to apply')).toBeNull();
     expect(screen.queryByText(/run gentle-ai sync/)).toBeNull();
     expect(writes(calls).length).toBe(1);
@@ -808,7 +899,8 @@ describe('Orchestration — create flow: CTA, AC-8 placement, reader XSS (WU-B)'
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'New agent' })).toBeNull(),
     );
-    expect(within(matrixTable()).getAllByRole('combobox').length).toBe(30);
+    // WU-4: the all-reserved matrix renders read-only cells — no pickers.
+    expect(within(matrixTable()).queryAllByRole('combobox')).toHaveLength(0);
   });
 
   it('a template create closes the modal, re-reads CONFIG and the agent lands as a generic list row (AC-8, AC-9, CX-3)', async () => {
@@ -964,20 +1056,39 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
 
   it('a successful sync clears the OA-3 "run gentle-ai sync" advisory it answers', async () => {
     const { calls } = scriptApi({
+      gets: [
+        fixture(sampleAgents({ 'my-helper': { description: 'standalone' } })),
+      ],
       puts: [okWrite('echo-A')],
       syncs: [syncReply(0, { hash: 'echo-A' })],
     });
     await rendered();
-    // A saved model edit raises the advisory (WU8 flow, intact).
-    setModel('sdd-spec', 'nan/qwen3.6');
+    // WU-6 MIGRATION of the pinned legacy flow: reserved `sdd-spec` no
+    // longer takes setModel — the row has NO active picker (S10), and the
+    // assignment leg flows through the panel's ONE native sync (POST
+    // /api/sync). The retained direct-PUT leg is re-anchored on the
+    // user-owned `my-helper` to raise the advisory (S11).
+    expect(
+      screen.queryByRole('combobox', { name: 'sdd-spec model' }),
+    ).toBeNull();
+    expect(
+      within(
+        within(matrixTable()).getByRole('row', { name: 'sdd-spec' }),
+      ).queryAllByRole('combobox'),
+    ).toHaveLength(0);
+    setModel('my-helper', 'nan/qwen3.6');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByText('Restart OpenCode to apply');
     expect(
       screen.getByText('run gentle-ai sync to refresh prompt table'),
     ).toBeTruthy();
 
-    // Running the sync from the panel IS that advice; it clears once done.
-    fireEvent.click(screen.getByRole('button', { name: 'Run sync' }));
+    // The assignment leg: apply through the panel — the native sync that IS
+    // that advice; exit 0 clears the advisory once done.
+    fireEvent.change(screen.getByLabelText('assign sdd-spec (deep)'), {
+      target: { value: 'nan/qwen3.6' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply assignments' }));
     expect(await screen.findByText('exit 0')).toBeTruthy();
     await waitFor(() =>
       expect(
@@ -1078,8 +1189,9 @@ describe('Orchestration — pipeline groups with badges (AP-9)', () => {
     for (const member of ['mypl', 'mypl-build', 'mypl-review']) {
       expect(others.queryByRole('row', { name: member })).toBeNull();
     }
-    // Phase matrix untouched (AP-9 pattern: groupAgents/splitVariant intact).
-    expect(within(matrixTable()).getAllByRole('combobox').length).toBe(30);
+    // Phase matrix untouched (AP-9 pattern: groupAgents/splitVariant intact;
+    // WU-4 gates its reserved cells to read-only text — 0 active pickers).
+    expect(within(matrixTable()).queryAllByRole('combobox')).toHaveLength(0);
   });
 
   it("member model cells are DISABLED with a builder pointer (AP-4: 'builder is the edit path)", async () => {
@@ -1403,6 +1515,120 @@ describe('Orchestration — pipeline create via the toggle closes once and re-re
     expect(
       await screen.findByRole('table', { name: 'Pipeline mypl' }),
     ).toBeTruthy();
+  });
+});
+
+describe('Orchestration — model assignments panel (WU-5, S1/S2/S4 integration)', () => {
+  it('mounts the assignments section: knowledge rows for the 14 phases + read-only fallback for unknown slugs', async () => {
+    scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'sdd-custom-thing-deep': { model: 'nan/qwen3.6' },
+          }),
+        ),
+      ],
+    });
+    await rendered();
+    expect(screen.getByText('Model assignments')).toBeTruthy();
+    const grid = screen.getByRole('table', { name: 'Assignments grid' });
+    // Knowledge rows render for the catalog phases (S1 render leg).
+    for (const slug of ['sdd-init', 'sdd-spec', 'jd-fix-agent']) {
+      expect(within(grid).getByRole('row', { name: slug })).toBeTruthy();
+    }
+    // Unknown config slugs render the generic fallback READ-ONLY (S2/S19).
+    const fallback = within(grid).getByRole('row', { name: 'custom-thing' });
+    expect(within(fallback).getByText(/read-only/)).toBeTruthy();
+    expect(screen.queryByLabelText('assign custom-thing (deep)')).toBeNull();
+  });
+
+  it('panel Apply shares the sync reload path: exit 0 → advisory cleared + exactly 2 CONFIG GETs (S4/S12)', async () => {
+    const { calls } = scriptApi({
+      syncs: [
+        {
+          status: 200,
+          body: {
+            ok: true,
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+            hash: 'hash-applied',
+          },
+        },
+      ],
+    });
+    await rendered();
+    fireEvent.change(screen.getByLabelText('assign sdd-spec (deep)'), {
+      target: { value: 'nan/mimo-v2.5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply assignments' }));
+    expect(await screen.findByText('exit 0')).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.queryByText('run gentle-ai sync to refresh prompt table'),
+      ).toBeNull(),
+    );
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(2);
+  });
+});
+
+describe('Orchestration — gentle-ai-owned rows lose direct pickers (WU-4, S10/S11)', () => {
+  it('EVERY isReserved row renders read-only model text, never an active picker (S10)', async () => {
+    scriptApi();
+    await rendered();
+    // Representatives across the whole reserved surface: sdd-* matrix
+    // families, orphan orchestrator variants, jd-*, review-*, and the three
+    // exact reserved names (D1 — ALL isReserved rows, not just sdd-*).
+    for (const name of [
+      'sdd-spec',
+      'sdd-spec-deep',
+      'sdd-orchestrator-cheap',
+      'sdd-orchestrator-deep',
+      'jd-judge-a',
+      'review-validator',
+      'general',
+      'explore',
+      'gentle-orchestrator',
+    ]) {
+      expect(
+        screen.queryByRole('combobox', { name: `${name} model` }),
+      ).toBeNull();
+    }
+    // Declared models surface as read-only mono text (not an empty control).
+    const specRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-spec',
+    });
+    expect(within(specRow).getByText('nan/qwen3.8-flash')).toBeTruthy(); // the -deep cell's declared model
+    const orchRow = within(otherTable()).getByRole('row', {
+      name: 'sdd-orchestrator-deep',
+    });
+    expect(within(orchRow).getByText('nanSendvalu/glm5.3')).toBeTruthy();
+    // Unset reserved rows read "runtime default".
+    expect(
+      within(
+        within(matrixTable()).getByRole('row', { name: 'sdd-spec' }),
+      ).getAllByText('runtime default').length,
+    ).toBe(2); // base + cheap cells
+  });
+
+  it('a user-owned row keeps its working picker → setModel → PUT (S11)', async () => {
+    const { calls } = scriptApi({
+      gets: [
+        fixture(sampleAgents({ 'my-helper': { description: 'standalone' } })),
+      ],
+      puts: [okWrite('echo-owned')],
+    });
+    await rendered();
+    setModel('my-helper', 'nan/qwen3.6');
+    expect(screen.getByText('1 change')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Restart OpenCode to apply');
+    const put = writes(calls)[0];
+    expect(put.url).toBe('/api/agents/my-helper/model');
+    expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
+    expect(picker('my-helper').value).toBe('nan/qwen3.6');
   });
 });
 
