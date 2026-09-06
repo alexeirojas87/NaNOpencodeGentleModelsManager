@@ -143,40 +143,42 @@ export default function StatusView() {
           </p>
         ) : (
           <>
-            <table className="models-table" aria-label="Snapshot drift">
-              <thead>
-                <tr>
-                  <th>Provider / model</th>
-                  <th>Field</th>
-                  <th>Declared</th>
-                  <th>Snapshot</th>
-                  <th>Advisory</th>
-                </tr>
-              </thead>
-              <tbody>
-                {status.drift.map((cell) => (
-                  <tr
-                    key={`${cell.provider}|${cell.model}|${cell.field}`}
-                    aria-label={`${cell.provider}/${cell.model}`}
-                  >
-                    <th className="mono" scope="row">
-                      {cell.provider}/{cell.model}
-                    </th>
-                    <td className="mono">{cell.field}</td>
-                    <td className="mono">{String(cell.declared)}</td>
-                    <td className="mono">{String(cell.snapshot)}</td>
-                    <td>
-                      <span
-                        className="chip chip-drift"
-                        title="Advisory only — the declared value is saved verbatim (MC-5)"
-                      >
-                        drift
-                      </span>
-                    </td>
+            <div className="table-scroll">
+              <table className="models-table" aria-label="Snapshot drift">
+                <thead>
+                  <tr>
+                    <th>Provider / model</th>
+                    <th>Field</th>
+                    <th>Declared</th>
+                    <th>Snapshot</th>
+                    <th>Advisory</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {status.drift.map((cell) => (
+                    <tr
+                      key={`${cell.provider}|${cell.model}|${cell.field}`}
+                      aria-label={`${cell.provider}/${cell.model}`}
+                    >
+                      <th className="mono" scope="row">
+                        {cell.provider}/{cell.model}
+                      </th>
+                      <td className="mono">{cell.field}</td>
+                      <td className="mono">{String(cell.declared)}</td>
+                      <td className="mono">{String(cell.snapshot)}</td>
+                      <td>
+                        <span
+                          className="chip chip-drift"
+                          title="Advisory only — the declared value is saved verbatim (MC-5)"
+                        >
+                          drift
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <p className="muted">
               Advisory only: the dashboard never auto-corrects a declared value,
               and drift never blocks a save (MC-5).

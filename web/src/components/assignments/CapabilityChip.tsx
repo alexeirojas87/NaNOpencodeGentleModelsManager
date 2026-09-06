@@ -9,6 +9,8 @@
 // contextWindow AND modalities, matching the spec enumeration.
 // MISSING flags never warn (absence of evidence is not evidence), and a
 // warning is ADVISORY: it renders a chip but must never disable Apply.
+import { useState } from 'react';
+
 import type { ModelConfig } from '../../../../shared/types';
 import type { PhaseNeed } from './phaseKnowledge';
 
@@ -45,7 +47,14 @@ export function capabilityWarning(
   return warnings.length > 0 ? warnings.join(' · ') : null;
 }
 
-/** The advisory chip — renders nothing when the assignment is compatible. */
+/**
+ * The advisory chip — renders nothing when the assignment is compatible.
+ * a11y surgery (dashboard-ui-redesign WU4): the chip is a real BUTTON — a
+ * keyboard-operable disclosure (Enter/Space by platform default) with
+ * aria-expanded. Activation toggles .chip-open, which unwraps the ellipsis
+ * so the FULL value is revealed and stays visible without pointer hover;
+ * the text node always carries the complete value (getByText-safe).
+ */
 export function CapabilityChip({
   model,
   needs,
@@ -54,10 +63,19 @@ export function CapabilityChip({
   needs: PhaseNeed[];
 }) {
   const warning = capabilityWarning(model, needs);
+  const [open, setOpen] = useState(false);
   if (!warning) return null;
   return (
-    <span className="chip">
+    <button
+      type="button"
+      className={
+        open ? 'chip chip-expandable chip-open' : 'chip chip-expandable'
+      }
+      aria-expanded={open}
+      title="Advisory — activate to unwrap the full value"
+      onClick={() => setOpen((v) => !v)}
+    >
       <span className="ro-flag">advisory</span> {warning}
-    </span>
+    </button>
   );
 }

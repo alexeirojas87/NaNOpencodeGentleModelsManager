@@ -264,6 +264,47 @@ function ModelPicker({
 }
 
 /**
+ * Expandable read-only disclosure (dashboard-ui-redesign WU4 a11y surgery):
+ * a nowrap label that can ellipsis-shrink becomes a real BUTTON with
+ * aria-expanded; activation toggles .chip-open and reveals the full text
+ * without pointer hover. The child spans keep their exact text so
+ * text-based queries (marker keys, "read-only") stay intact.
+ */
+function ExpandableFlag({ label }: { label: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className={open ? 'ro-flag chip-open' : 'ro-flag chip-expandable'}
+      aria-expanded={open}
+      title="Read-only note — activate to unwrap the full text"
+      onClick={() => setOpen((v) => !v)}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Keyboard-operable marker chip: the key stays the named .mono span. */
+function MarkerChip({ markerKey }: { markerKey: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className={
+        open ? 'chip chip-expandable chip-open' : 'chip chip-expandable'
+      }
+      aria-expanded={open}
+      title="Read-only marker — activate to unwrap the full key"
+      onClick={() => setOpen((v) => !v)}
+    >
+      <span className="mono">{markerKey}</span>{' '}
+      <span className="ro-flag">read-only</span>
+    </button>
+  );
+}
+
+/**
  * Cell surface (OA-4, design D8 — WU-B): picker-only cell plus a
  * "view prompt" trigger and gentle-ai:* marker chips. The prompt body NEVER
  * renders inside the cell (the full text lives in the read-only
@@ -306,10 +347,7 @@ function PromptCell({
         </button>
       )}
       {markers.map((key) => (
-        <span key={key} className="chip">
-          <span className="mono">{key}</span>{' '}
-          <span className="ro-flag">read-only</span>
-        </span>
+        <MarkerChip key={key} markerKey={key} />
       ))}
       {deletable && onDelete && (
         <button
@@ -665,54 +703,58 @@ export default function OrchestrationView() {
 
       <section className="orch-section">
         <h3>Phase matrix</h3>
-        <table className="orch-table" aria-label="Phase model assignments">
-          <thead>
-            <tr>
-              <th>Phase</th>
-              {COLUMNS.map((column) => (
-                <th key={column}>
-                  {column === 'base' ? 'base' : `-${column}`}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.family} aria-label={row.family}>
-                <th className="mono" scope="row">
-                  {row.family}
-                </th>
-                {COLUMNS.map((column) => {
-                  const name = row.cells[column];
-                  return (
-                    <td
-                      key={column}
-                      className={name ? undefined : 'cell-absent'}
-                    >
-                      {name ? (
-                        <>
-                          {pickerNode(name)}
-                          <PromptCell
-                            agentName={name}
-                            entry={base.agents[name]}
-                            onRead={setReader}
-                            onEdit={
-                              isUserOwned(name) ? setPromptEdit : undefined
-                            }
-                            deletable={isUserOwned(name)}
-                            onDelete={setAgentConfirm}
-                          />
-                        </>
-                      ) : (
-                        <span>agent absent</span>
-                      )}
-                    </td>
-                  );
-                })}
+        {/* .table-scroll: wide phase rows scroll inside the wrapper instead
+            of overflowing the page (responsive-shell surgery). */}
+        <div className="table-scroll">
+          <table className="orch-table" aria-label="Phase model assignments">
+            <thead>
+              <tr>
+                <th>Phase</th>
+                {COLUMNS.map((column) => (
+                  <th key={column}>
+                    {column === 'base' ? 'base' : `-${column}`}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.family} aria-label={row.family}>
+                  <th className="mono" scope="row">
+                    {row.family}
+                  </th>
+                  {COLUMNS.map((column) => {
+                    const name = row.cells[column];
+                    return (
+                      <td
+                        key={column}
+                        className={name ? undefined : 'cell-absent'}
+                      >
+                        {name ? (
+                          <>
+                            {pickerNode(name)}
+                            <PromptCell
+                              agentName={name}
+                              entry={base.agents[name]}
+                              onRead={setReader}
+                              onEdit={
+                                isUserOwned(name) ? setPromptEdit : undefined
+                              }
+                              deletable={isUserOwned(name)}
+                              onDelete={setAgentConfirm}
+                            />
+                          </>
+                        ) : (
+                          <span>agent absent</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {/* agent-pipelines AP-9: members grouped under their definition key.
@@ -744,53 +786,53 @@ export default function OrchestrationView() {
                     </button>
                   </span>
                 </div>
-                <table className="orch-table" aria-label={`Pipeline ${key}`}>
-                  <thead>
-                    <tr>
-                      <th>Member</th>
-                      <th>Model</th>
-                      <th>Prompt / markers</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {memberRows.map((name) => (
-                      <tr key={name} aria-label={name}>
-                        <th className="mono" scope="row">
-                          {name}
-                        </th>
-                        <td>
-                          <ModelPicker
-                            agentName={name}
-                            value={declaredModel(base.agents[name]) ?? ''}
-                            pairs={pairs}
-                            onChange={() => undefined}
-                            disabled
-                          />
-                          <div className="ro-extras">
-                            <button
-                              type="button"
-                              className="btn"
-                              onClick={() => setBuilder({ name: key })}
-                            >
-                              edit in builder
-                            </button>{' '}
-                            <span className="ro-flag">
-                              generic edits rejected — pipeline-owned (AP-4)
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <PromptCell
-                            agentName={name}
-                            entry={base.agents[name] ?? {}}
-                            onRead={setReader}
-                          />
-                          <span className="badge">pipeline {key}</span>
-                        </td>
+                <div className="table-scroll">
+                  <table className="orch-table" aria-label={`Pipeline ${key}`}>
+                    <thead>
+                      <tr>
+                        <th>Member</th>
+                        <th>Model</th>
+                        <th>Prompt / markers</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {memberRows.map((name) => (
+                        <tr key={name} aria-label={name}>
+                          <th className="mono" scope="row">
+                            {name}
+                          </th>
+                          <td>
+                            <ModelPicker
+                              agentName={name}
+                              value={declaredModel(base.agents[name]) ?? ''}
+                              pairs={pairs}
+                              onChange={() => undefined}
+                              disabled
+                            />
+                            <div className="ro-extras">
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() => setBuilder({ name: key })}
+                              >
+                                edit in builder
+                              </button>{' '}
+                              <ExpandableFlag label="generic edits rejected — pipeline-owned (AP-4)" />
+                            </div>
+                          </td>
+                          <td>
+                            <PromptCell
+                              agentName={name}
+                              entry={base.agents[name] ?? {}}
+                              onRead={setReader}
+                            />
+                            <span className="badge">pipeline {key}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           })}
@@ -799,35 +841,37 @@ export default function OrchestrationView() {
 
       <section className="orch-section">
         <h3>Other agents</h3>
-        <table className="orch-table" aria-label="Other agents">
-          <thead>
-            <tr>
-              <th>Agent</th>
-              <th>Model</th>
-              <th>Prompt / markers</th>
-            </tr>
-          </thead>
-          <tbody>
-            {others.map((name) => (
-              <tr key={name} aria-label={name}>
-                <th className="mono" scope="row">
-                  {name}
-                </th>
-                <td>{pickerNode(name)}</td>
-                <td>
-                  <PromptCell
-                    agentName={name}
-                    entry={base.agents[name]}
-                    onRead={setReader}
-                    onEdit={isUserOwned(name) ? setPromptEdit : undefined}
-                    deletable={isUserOwned(name)}
-                    onDelete={setAgentConfirm}
-                  />
-                </td>
+        <div className="table-scroll">
+          <table className="orch-table" aria-label="Other agents">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Model</th>
+                <th>Prompt / markers</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {others.map((name) => (
+                <tr key={name} aria-label={name}>
+                  <th className="mono" scope="row">
+                    {name}
+                  </th>
+                  <td>{pickerNode(name)}</td>
+                  <td>
+                    <PromptCell
+                      agentName={name}
+                      entry={base.agents[name]}
+                      onRead={setReader}
+                      onEdit={isUserOwned(name) ? setPromptEdit : undefined}
+                      deletable={isUserOwned(name)}
+                      onDelete={setAgentConfirm}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {/* WU9 (OA-3): the sync action the advisory above points at. A

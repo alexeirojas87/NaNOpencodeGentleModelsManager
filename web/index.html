@@ -3,8 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#14161A" />
+    <!-- Meta fix (dashboard-ui-redesign WU5.2): the light chrome is declared
+         here because HTML sits outside the CSS TH-1 token scans. Meta only —
+         no font preload (JetBrains Mono ships via @fontsource-variable). -->
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f6f7f9" />
     <meta
       name="description"
       content="Local utility console for OpenCode provider/model configuration"

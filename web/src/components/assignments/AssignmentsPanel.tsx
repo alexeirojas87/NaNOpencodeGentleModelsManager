@@ -113,6 +113,26 @@ function modelConfig(
   return providers[pair.slice(0, slash)]?.models?.[pair.slice(slash + 1)];
 }
 
+/**
+ * Expandable read-only disclosure (dashboard-ui-redesign WU4 a11y surgery):
+ * the fallback row's nowrap flag becomes a keyboard-operable button with
+ * aria-expanded — activation unwraps the full text without pointer hover.
+ */
+function ReadOnlyPhaseFlag() {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className={open ? 'ro-flag chip-open' : 'ro-flag chip-expandable'}
+      aria-expanded={open}
+      title="Read-only note — activate to unwrap the full text"
+      onClick={() => setOpen((v) => !v)}
+    >
+      read-only — not assignable via the CLI phase list
+    </button>
+  );
+}
+
 export interface AssignmentsPanelProps {
   /** The loaded CONFIG snapshot — declared models + providers come from here. */
   base: ConfigResponse;
@@ -264,70 +284,72 @@ export function AssignmentsPanel({ base, onSynced }: AssignmentsPanelProps) {
         <code className="mono">--profile</code> flags) and re-reads CONFIG on
         success. Assignments are set-only: to move a phase, pick another model.
       </p>
-      <table className="orch-table" aria-label="Assignments grid">
-        <thead>
-          <tr>
-            <th>Phase</th>
-            <th>What it does</th>
-            <th>Load</th>
-            <th>Needs</th>
-            <th>cheap</th>
-            <th>deep</th>
-          </tr>
-        </thead>
-        <tbody>
-          {PHASE_IDS.map((slug) => (
-            <tr key={slug} aria-label={slug}>
-              <th className="mono" scope="row">
-                {slug}
-              </th>
-              {knowledgeCells(knowledgeFor(slug))}
-              <td>{selectFor(slug, 'cheap')}</td>
-              <td>{selectFor(slug, 'deep')}</td>
+      <div className="table-scroll">
+        <table className="orch-table" aria-label="Assignments grid">
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th>What it does</th>
+              <th>Load</th>
+              <th>Needs</th>
+              <th>cheap</th>
+              <th>deep</th>
             </tr>
-          ))}
-          {unknown.map((slug) => (
-            <tr key={slug} aria-label={slug}>
-              <th className="mono" scope="row">
-                {slug}
-              </th>
-              {knowledgeCells(FALLBACK_KNOWLEDGE)}
-              <td colSpan={2}>
-                <span className="ro-flag">
-                  read-only — not assignable via the CLI phase list
-                </span>
-              </td>
+          </thead>
+          <tbody>
+            {PHASE_IDS.map((slug) => (
+              <tr key={slug} aria-label={slug}>
+                <th className="mono" scope="row">
+                  {slug}
+                </th>
+                {knowledgeCells(knowledgeFor(slug))}
+                <td>{selectFor(slug, 'cheap')}</td>
+                <td>{selectFor(slug, 'deep')}</td>
+              </tr>
+            ))}
+            {unknown.map((slug) => (
+              <tr key={slug} aria-label={slug}>
+                <th className="mono" scope="row">
+                  {slug}
+                </th>
+                {knowledgeCells(FALLBACK_KNOWLEDGE)}
+                <td colSpan={2}>
+                  <ReadOnlyPhaseFlag />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-scroll">
+        <table className="orch-table" aria-label="Orchestrator assignments">
+          <thead>
+            <tr>
+              <th>Orchestrator</th>
+              <th>What it does</th>
+              <th>Load</th>
+              <th>Needs</th>
+              <th>cheap</th>
+              <th>deep</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <table className="orch-table" aria-label="Orchestrator assignments">
-        <thead>
-          <tr>
-            <th>Orchestrator</th>
-            <th>What it does</th>
-            <th>Load</th>
-            <th>Needs</th>
-            <th>cheap</th>
-            <th>deep</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr aria-label="sdd-orchestrator">
-            <th className="mono" scope="row">
-              sdd-orchestrator
-            </th>
-            {knowledgeCells({
-              purpose:
-                'Coordinates SDD runs; model rides the --profile flag per variant',
-              load: 'high',
-              needs: [],
-            })}
-            <td>{selectFor('orchestrator', 'cheap')}</td>
-            <td>{selectFor('orchestrator', 'deep')}</td>
-          </tr>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr aria-label="sdd-orchestrator">
+              <th className="mono" scope="row">
+                sdd-orchestrator
+              </th>
+              {knowledgeCells({
+                purpose:
+                  'Coordinates SDD runs; model rides the --profile flag per variant',
+                load: 'high',
+                needs: [],
+              })}
+              <td>{selectFor('orchestrator', 'cheap')}</td>
+              <td>{selectFor('orchestrator', 'deep')}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <button
         type="button"
         className="btn btn-primary"

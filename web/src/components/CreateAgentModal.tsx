@@ -85,6 +85,11 @@ export function CreateAgentModal({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<ConflictInfo | null>(null);
+  // a11y surgery (dashboard-ui-redesign WU4.1): a failed submit renders a
+  // top-of-form error summary that RECEIVES FOCUS; its entries move focus to
+  // the invalid fields. errorEpoch gates render + drives the focus effect.
+  const [errorEpoch, setErrorEpoch] = useState(0);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   // Clone materialization is async; a newer selection must win the race.
   const cloneSeq = useRef(0);
   const pairs = installedPairs(base.providers);
@@ -102,6 +107,12 @@ export function CreateAgentModal({
       active = false;
     };
   }, []);
+
+  // a11y surgery (WU4.1): each failed submit bumps errorEpoch; the summary
+  // (rendered below) receives focus after that render commits.
+  useEffect(() => {
+    if (errorEpoch > 0) summaryRef.current?.focus();
+  }, [errorEpoch]);
 
   function chooseSource(next: string) {
     setSource(next);
@@ -166,8 +177,10 @@ export function CreateAgentModal({
         else if (err.code === 'model_unknown') setModelError(err.message);
         else if (PROMPT_CODES.has(err.code)) setPromptError(err.message);
         else setGeneralError(err.message); // unknown_field, bad_request, …
+        setErrorEpoch((epoch) => epoch + 1);
       } else {
         setGeneralError('The create request failed unexpectedly.');
+        setErrorEpoch((epoch) => epoch + 1);
       }
     } finally {
       setBusy(false);
@@ -188,6 +201,18 @@ export function CreateAgentModal({
     );
   }
 
+  // Summary entries are named by FIELD LABEL only — never the error message
+  // (that stays in the inline .field-error, so no text is duplicated and
+  // strict-mode getByText queries stay single-match).
+  const summaryEntries: { label: string; target: string }[] = [];
+  if (nameError) summaryEntries.push({ label: 'Name', target: 'create-name' });
+  if (modelError)
+    summaryEntries.push({ label: 'Model', target: 'create-model' });
+  if (templateError)
+    summaryEntries.push({ label: 'Prompt source', target: 'create-source' });
+  if (promptError)
+    summaryEntries.push({ label: 'Prompt source', target: 'create-source' });
+
   return (
     <div className="overlay">
       <form
@@ -201,6 +226,21 @@ export function CreateAgentModal({
         }}
       >
         <h2>New agent</h2>
+        {errorEpoch > 0 &&
+          (summaryEntries.length > 0 || generalError !== null) && (
+            <div className="error-summary" tabIndex={-1} ref={summaryRef}>
+              {summaryEntries.map((entry, i) => (
+                <button
+                  key={`${entry.target}-${i}`}
+                  type="button"
+                  onClick={() => document.getElementById(entry.target)?.focus()}
+                >
+                  {entry.label}
+                </button>
+              ))}
+              {generalError && <span>General error</span>}
+            </div>
+          )}
         <div className="field" role="radiogroup" aria-label="Create as">
           <label>
             <input
