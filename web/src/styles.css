@@ -415,6 +415,16 @@ code {
   border-color: var(--accent-active);
 }
 
+/* Disabled primary keeps its white label on the accent fill: .btn:disabled's
+   --muted gray is tuned for the page surface and vanishes on indigo (blended
+   contrast ~1.6:1). White at 0.8 opacity still reads as dimmed while its
+   blended contrast over indigo stays >=4.5:1 (pair pinned in
+   contrast.test.ts; blended effective ratio ~4.6:1). */
+.btn-primary:disabled {
+  color: var(--on-accent-strong);
+  opacity: 0.8;
+}
+
 /* --- conflict modal (SCW-2) ---------------------------------------------------- */
 
 .overlay {
