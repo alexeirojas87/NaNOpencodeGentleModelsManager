@@ -71,7 +71,8 @@
      (brand, view titles, modal titles). */
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono:
-    'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular',
+    Menlo, monospace;
   --font-display: var(--font-mono);
   /* Horizontal page gutter; the savebar negative margins couple to it.
      640px compacts it to 16px (see the breakpoint note in the header). */
