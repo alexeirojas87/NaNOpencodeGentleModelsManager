@@ -271,7 +271,7 @@ html {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -667,6 +667,9 @@ html {
 .models-table {
   border-collapse: collapse;
   margin-bottom: 18px;
+  /* Keeps columns readable inside the .table-scroll wrapper at narrow
+     viewports instead of crushing to one glyph per line. */
+  min-width: 640px;
   width: 100%;
 }
 
@@ -807,6 +810,27 @@ html {
   text-transform: uppercase;
 }
 
+/* Row hover affordance (visual-pass checklist 9): data rows transition their
+   background; decorative header tiles are not interactive and get none.
+   Reduced-motion zeroes the transition via the global block. */
+.orch-table tbody tr,
+.models-table tbody tr {
+  transition: background var(--dur-fast) ease;
+}
+
+.orch-table tbody tr:hover,
+.models-table tbody tr:hover {
+  background: var(--bg);
+}
+
+/* Assignments grid: keep the "What it does" column readable instead of
+   crushing to one word per line inside its scroll wrapper (visual-pass
+   moderate #3). */
+.assignments-panel .orch-table th:nth-child(2),
+.assignments-panel .orch-table td:nth-child(2) {
+  min-width: 180px;
+}
+
 .orch-table select {
   background: var(--bg);
   border: 1px solid var(--line);
@@ -871,8 +895,23 @@ html {
   margin-bottom: 3px;
 }
 
+/* Radio/checkbox labels wrap their input: render inline instead of stacking
+   the control above the text (visual-pass cosmetic #4). Shared by the
+   pipeline builder, which reuses .create-form. */
+.create-form label:has(input[type='radio']),
+.create-form label:has(input[type='checkbox']) {
+  align-items: center;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 0;
+}
+
 .create-form input,
-.create-form select {
+.create-form select,
+.create-form textarea {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
