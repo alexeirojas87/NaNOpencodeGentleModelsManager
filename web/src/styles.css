@@ -1,20 +1,27 @@
-/* WU6.1 theme, migrated in orchestration-v2 WU-C (design token map TH-1..4).
-   A working config tool, not a landing page: light neutral surfaces, one
-   indigo accent for interactive/focus states, the amber family kept as a
-   dedicated --warning for drift/banner/error semantics (D6), and a single
-   superfamily (IBM Plex Sans for prose, Plex Mono for ids/paths/values).
-   Every color, radius and shadow is a :root token (TH-1 — one-knob retheme,
-   machine-checked by contrast.test.ts at WCAG 2.1 AA); motion is limited to
-   the save bar and the bundled spinner; focus-visible and reduced-motion are
-   honored. */
+/* Console-evolution light retheme (dashboard-ui-redesign): a token-only
+   reskin of the utility console. Cool paper surfaces, one indigo accent for
+   interactive/focus states, the amber family kept as a dedicated --warning
+   for drift/banner/error semantics (D6). Body text stays IBM Plex Sans (the
+   existing @fontsource imports in main.tsx — deliberately unchanged); the
+   mono identity face is JetBrains Mono (variable woff2, self-hosted via
+   @fontsource-variable), used for brand, view titles, ids, hashes, exit
+   codes and chip values. Every color, radius and shadow is a :root token
+   (TH-1 — one-knob retheme, machine-checked by contrast.test.ts at WCAG 2.1
+   AA); motion is tokenized to --dur-fast/--dur-slow and zeroed under
+   prefers-reduced-motion; focus-visible is honored.
+   Viewport constants (breakpoints cannot use var() inside @media
+   preconditions — documented here as the single source of truth):
+   RAIL COLLAPSE 900px (shell grid column 64px, icon-only rail),
+   COMPACT 640px (--pad-x 16px, stacking, wrapped toolbars). */
 
 :root {
-  /* Surfaces & text — light theme (TH-2). Ratios: contrast.test.ts. */
-  --bg: #f5f6fa;
+  /* Surfaces & text — light theme (TH-2, bg luminance 0.9295 >= 0.90 floor).
+     Ratios: contrast.test.ts re-proves every pair by token NAME. */
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --line: #e2e5ea;
-  --text: #1f2430;
-  --muted: #5b6472;
+  --line: #e4e7ec;
+  --text: #171b28;
+  --muted: #4f5766;
   /* Indigo accent family (TH-3): --accent carries focus rings and UI parts
      (>=3:1), --accent-strong carries links/active-nav/primary buttons with
      --on-accent-strong text (>=4.5:1), --accent-active is the hover stop. */
@@ -26,25 +33,49 @@
      errors — the old dual-role amber narrowed to warning semantics only. */
   --warning: #b45309;
   --warning-tint: #fffbeb;
-  /* Pastel icon tiles — fg/bg pairs, all >=6.3:1 (TH-3 design language). */
-  --tile-blue-fg: #1e40af;
-  --tile-blue-bg: #dbeafe;
-  --tile-green-fg: #166534;
-  --tile-green-bg: #dcfce7;
-  --tile-purple-fg: #5b21b6;
-  --tile-purple-bg: #ede9fe;
-  --tile-yellow-fg: #92400e;
-  --tile-yellow-bg: #fef3c7;
-  --tile-neutral-fg: #475569;
-  --tile-neutral-bg: #eef0f4;
-  /* Radii & shadows: cards 12, controls 8, pills 999; soft card shadow. */
-  --radius-card: 12px;
-  --radius-control: 8px;
+  /* Flat pastel icon tiles — fg/bg pairs, all >=7.3:1 (TH-3 design language,
+     Swiss flat tints re-derived for the cool paper background). */
+  --tile-blue-fg: #1e3a8a;
+  --tile-blue-bg: #dce4f2;
+  --tile-green-fg: #14532d;
+  --tile-green-bg: #dcebdd;
+  --tile-purple-fg: #4c1d95;
+  --tile-purple-bg: #e8e3f4;
+  --tile-yellow-fg: #78350f;
+  --tile-yellow-bg: #f2e9d4;
+  --tile-neutral-fg: #364152;
+  --tile-neutral-bg: #e6e8ee;
+  /* Radii & shadows: Swiss flatten — cards 10, controls 6, pills 999;
+     soft card shadow (rgb literals stay here inside :root, TH-1-legal). */
+  --radius-card: 10px;
+  --radius-control: 6px;
   --radius-pill: 999px;
   --shadow-card: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
   --overlay: rgb(15 23 42 / 45%);
+  /* 8px spacing rhythm (4px half-step): --space-1..6 = 4/8/12/16/24/32. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  /* Motion tokens: hover/focus feedback 150ms, larger surface shifts 250ms;
+     the global prefers-reduced-motion block zeroes both. */
+  --dur-fast: 150ms;
+  --dur-slow: 250ms;
+  /* Type: body stays IBM Plex Sans via main.tsx @fontsource imports (the
+     binding font-policy correction — --font-sans is UNTOUCHED by the
+     retheme); mono identity is JetBrains Mono, fallback-first so text is
+     never invisible while the variable woff2 loads (font-display: swap).
+     --font-display is the semantic alias for the mono identity surfaces
+     (brand, view titles, modal titles). */
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --font-display: var(--font-mono);
+  /* Horizontal page gutter; the savebar negative margins couple to it.
+     640px compacts it to 16px (see the breakpoint note in the header). */
+  --pad-x: 32px;
 }
 
 * {
@@ -139,11 +170,18 @@ code {
   min-height: 100vh;
 }
 
+/* Focus-not-obscured (WCAG 2.2): the sticky savebar is viewport-anchored, so
+   the document scroller reserves savebar height + breathing room below every
+   tab stop. The 88px figure is pinned by the design (savebar ~50px + gap). */
+html {
+  scroll-padding-bottom: 88px;
+}
+
 .rail {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 20px 12px;
+  padding: var(--space-5) var(--space-3);
   border-right: 1px solid var(--line);
   position: sticky;
   top: 0;
@@ -151,10 +189,11 @@ code {
 }
 
 .rail-brand {
+  font-family: var(--font-display);
   font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.01em;
-  padding: 0 10px 18px;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  padding: 0 var(--space-3) var(--space-4);
 }
 
 .rail-brand span {
@@ -170,9 +209,12 @@ code {
   cursor: pointer;
   display: flex;
   font: inherit;
-  gap: 9px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   text-align: left;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .rail-item:hover {
@@ -180,24 +222,34 @@ code {
 }
 
 /* Active navigation is a filled indigo pill (TH-3 design language), not the
-   old inset bar; white pill text is the --on-accent-strong contrast pair. */
+   old inset bar; white pill text is the --on-accent-strong contrast pair.
+   The wider padding is offset by a matching negative margin so hover and
+   active states stay left-aligned. */
 .rail-item[aria-current='page'] {
   background: var(--accent-strong);
   border-radius: var(--radius-pill);
   color: var(--on-accent-strong);
   font-weight: 600;
-  padding: 8px 14px;
+  margin: 0 calc(-1 * var(--space-1));
+  padding: var(--space-2) calc(var(--space-3) + var(--space-1));
 }
 
 .rail-foot {
   margin-top: auto;
   font-size: 11.5px;
-  padding: 0 10px;
+  padding: 0 var(--space-3);
 }
 
 .content {
-  padding: 28px 32px 96px;
+  padding: var(--space-5) var(--pad-x) calc(var(--space-6) * 3);
   min-width: 0;
+}
+
+/* Wide tables scroll horizontally INSIDE their wrapper; the page itself
+   never scrolls in two dimensions (responsive-shell scenarios; the wrappers
+   are the spec's sanctioned reflow exception at 320px). */
+.table-scroll {
+  overflow-x: auto;
 }
 
 /* --- views + provider cards ------------------------------------------------ */
@@ -205,10 +257,12 @@ code {
 .view-header h2 {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   margin: 0 0 2px;
-  font-size: 18px;
+  font-family: var(--font-display);
+  font-size: 20px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .view-header p {
@@ -217,7 +271,7 @@ code {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -253,6 +307,57 @@ code {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Chip shrink + pointer affordance (a11y-gaps): chips and nowrap labels
+   compress with ellipsis inside constrained layouts instead of overflowing
+   their container; the sole sanctioned truncation is paired with the
+   keyboard-operable disclosure (.chip-expandable, a11y-behaviors suite). */
+.chip,
+.chip-drift,
+.chip-exit-ok,
+.chip-exit-fail,
+.ro-flag,
+.badge {
+  cursor: pointer;
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+  vertical-align: bottom;
+}
+
+/* Constrained-shrink hosts: flex containers must be allowed to compress so
+   their chip children can ellipsis-shrink with the layout. */
+.card-header,
+.drift-pair,
+.ro-extras,
+.sync-head {
+  min-width: 0;
+}
+
+/* Keyboard-operable chip disclosure (HIGH a11y): the expandable chip is a
+   real button — activation toggles .chip-open, which unwraps the ellipsis
+   and reveals the full value without pointer hover. Declared BEFORE
+   .ro-flag so the flag's pill border/padding survive this button reset. */
+.chip-expandable {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.chip-open {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .card label {
@@ -344,7 +449,11 @@ code {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  padding: 2px 10px;
+  padding: var(--space-1) var(--space-3);
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 /* --- sticky save bar ---------------------------------------------------------- */
@@ -354,13 +463,16 @@ code {
   bottom: 0;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(4px);
   border-top: 1px solid var(--line);
-  margin: 24px -32px -96px;
-  padding: 12px 32px;
-  transition: box-shadow 0.15s ease;
+  /* The negative margins + bottom overlap couple to .content's --pad-x
+     gutter and its calc(var(--space-6) * 3) clearance — keep the pair in
+     sync (640px compaction edits --pad-x only). */
+  margin: var(--space-5) calc(-1 * var(--pad-x)) calc(-1 * var(--space-6) * 3);
+  padding: var(--space-3) var(--pad-x);
+  transition: box-shadow var(--dur-fast) ease;
 }
 
 .savebar-count {
@@ -391,8 +503,12 @@ code {
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  gap: 6px;
-  padding: 6px 16px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .btn:disabled {
@@ -435,6 +551,7 @@ code {
   place-items: center;
   padding: 24px;
   z-index: 20;
+  overflow-y: auto;
 }
 
 .modal {
@@ -445,14 +562,26 @@ code {
   max-width: 720px;
   width: 100%;
   padding: 20px 24px 22px;
+  /* Tall dialogs (pipeline builder, create form) scroll internally instead of
+     chaining wheel events to the page behind the overlay. */
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Focus-not-obscured inside the modal's own scroller: tab stops keep
+     clearance above the modal-actions row. */
+  scroll-padding-bottom: calc(var(--space-6) + var(--space-4));
 }
 
 .modal h2 {
   align-items: center;
   display: flex;
-  font-size: 16px;
-  gap: 8px;
-  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
 
 .modal-note {
@@ -476,7 +605,9 @@ code {
   border-bottom: 1px solid var(--line);
   font-size: 12.5px;
   overflow-wrap: anywhere;
-  padding: 6px 10px 6px 0;
+  /* Table padding fix (WU5.1): horizontally symmetric 8px/12px — kills the
+     left-zero defect where content glued to the cell border. */
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
 }
@@ -536,6 +667,9 @@ code {
 .models-table {
   border-collapse: collapse;
   margin-bottom: 18px;
+  /* Keeps columns readable inside the .table-scroll wrapper at narrow
+     viewports instead of crushing to one glyph per line. */
+  min-width: 640px;
   width: 100%;
 }
 
@@ -544,7 +678,8 @@ code {
   border-bottom: 1px solid var(--line);
   font-size: 13px;
   overflow-wrap: anywhere;
-  padding: 8px 12px 8px 0;
+  /* Symmetric 8px/12px cell padding — same left-zero fix as .diff. */
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: baseline;
 }
@@ -639,7 +774,8 @@ code {
 .orch-table td {
   border-bottom: 1px solid var(--line);
   font-size: 13px;
-  padding: 8px 12px 8px 0;
+  /* Symmetric 8px/12px cell padding — same left-zero fix as .diff. */
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
 }
@@ -661,6 +797,38 @@ code {
 .orch-table thead th {
   color: var(--muted);
   font-weight: 500;
+}
+
+/* Caps-label column headers (mono-identity type scale): the uppercase paint
+   is CSS-only — DOM textContent is unchanged, so text-based test queries
+   stay safe. thead-only: tbody row headers keep their mono casing. */
+.orch-table thead th,
+.models-table thead th,
+.diff thead th {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Row hover affordance (visual-pass checklist 9): data rows transition their
+   background; decorative header tiles are not interactive and get none.
+   Reduced-motion zeroes the transition via the global block. */
+.orch-table tbody tr,
+.models-table tbody tr {
+  transition: background var(--dur-fast) ease;
+}
+
+.orch-table tbody tr:hover,
+.models-table tbody tr:hover {
+  background: var(--bg);
+}
+
+/* Assignments grid: keep the "What it does" column readable instead of
+   crushing to one word per line inside its scroll wrapper (visual-pass
+   moderate #3). */
+.assignments-panel .orch-table th:nth-child(2),
+.assignments-panel .orch-table td:nth-child(2) {
+  min-width: 180px;
 }
 
 .orch-table select {
@@ -727,8 +895,23 @@ code {
   margin-bottom: 3px;
 }
 
+/* Radio/checkbox labels wrap their input: render inline instead of stacking
+   the control above the text (visual-pass cosmetic #4). Shared by the
+   pipeline builder, which reuses .create-form. */
+.create-form label:has(input[type='radio']),
+.create-form label:has(input[type='checkbox']) {
+  align-items: center;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 0;
+}
+
 .create-form input,
-.create-form select {
+.create-form select,
+.create-form textarea {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -760,7 +943,45 @@ code {
 .field-error {
   color: var(--warning);
   font-size: 12px;
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
+}
+
+/* Focusable error summary (HIGH a11y, WU4): rendered at the top of
+   multi-error forms after a failed submit and RECEIVES focus; its entries
+   are buttons that move focus to the invalid fields. Deliberately NOT an
+   alert (no role) — the inline .field-error keeps the alert semantics, and
+   entries carry field labels only so no error text is duplicated. */
+.error-summary {
+  align-items: center;
+  background: var(--warning-tint);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-control);
+  color: var(--warning);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+.error-summary button {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--warning);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: var(--space-1) var(--space-3);
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.error-summary > span {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* --- sync panel (WU9, OA-3) ------------------------------------------------- */
@@ -886,6 +1107,62 @@ code {
 
 .restore-cmd code {
   overflow-wrap: anywhere;
+}
+
+/* --- responsive shell ------------------------------------------------------
+   Breakpoints are documented constants in the :root header comment (var()
+   is not allowed inside @media preconditions): 900px collapses the rail to
+   icon-only, 640px compacts the gutter and stacks the header. */
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .rail {
+    align-items: stretch;
+    padding: var(--space-4) var(--space-2);
+  }
+
+  /* Icon-only rail: font-size:0 hides the LABEL PAINT but keeps every
+     accessible name — display:none would strip the buttons' names entirely.
+     Icons are aria-hidden, so the span.rail-label text stays the name. */
+  .rail-brand,
+  .rail-foot,
+  .rail-item {
+    font-size: 0;
+  }
+
+  .rail-brand,
+  .rail-foot {
+    padding-left: 0;
+    padding-right: 0;
+    text-align: center;
+  }
+
+  .rail-item {
+    gap: 0;
+    justify-content: center;
+    padding: var(--space-2) 0;
+  }
+
+  .rail-item[aria-current='page'] {
+    margin: 0;
+    padding: var(--space-2) 0;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --pad-x: 16px;
+  }
+
+  .view-header {
+    flex-direction: column;
+  }
+
+  .view-header .btn-primary {
+    margin-left: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -48,7 +48,10 @@ export default function App() {
             onClick={() => setSection(item.id)}
           >
             {RAIL_ICONS[item.id]}
-            {item.label}
+            {/* The label span is the rail-collapse hook: the 900px breakpoint
+                sets .rail-item font-size:0 (icon-only paint) while this text
+                keeps the button's accessible name intact. */}
+            <span className="rail-label">{item.label}</span>
           </button>
         ))}
         <div className="rail-foot muted">

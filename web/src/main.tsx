@@ -5,6 +5,10 @@ import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
+// Console-evolution identity face: self-hosted variable woff2 via the repo's
+// established @fontsource offline pattern (OFL-1.1, font-display swap in the
+// package CSS). Imported before styles.css so var(--font-mono) resolves to it.
+import '@fontsource-variable/jetbrains-mono';
 import './styles.css';
 
 import { StrictMode } from 'react';

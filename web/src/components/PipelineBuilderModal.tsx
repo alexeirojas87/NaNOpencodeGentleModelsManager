@@ -129,6 +129,11 @@ export function PipelineBuilderModal({
   const [nameError, setNameError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<ConflictInfo | null>(null);
+  // a11y surgery (dashboard-ui-redesign WU4.2): a failed submit renders a
+  // top-of-form error summary that RECEIVES FOCUS; entries move focus to the
+  // invalid fields. errorEpoch gates render + drives the focus effect.
+  const [errorEpoch, setErrorEpoch] = useState(0);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   // Per-card error slots keyed by card index (recomputed each submit).
   const [cardErrors, setCardErrors] = useState<
     Record<number, { name?: string; model?: string }>
@@ -217,6 +222,37 @@ export function PipelineBuilderModal({
     name.trim() !== '' &&
     roles.length > 0 &&
     roles.every((r) => r.name.trim() !== '' && r.prompt !== '');
+
+  // a11y surgery (WU4.2): each failed submit bumps errorEpoch; the summary
+  // (rendered below) receives focus after that render commits. This modal
+  // has no early returns, so the effect sits safely with the other hooks.
+  useEffect(() => {
+    if (errorEpoch > 0) summaryRef.current?.focus();
+  }, [errorEpoch]);
+
+  // Summary entries are named by FIELD LABEL only — never the error message
+  // (that stays in the inline .field-error, so no text is duplicated and
+  // strict-mode getByText queries stay single-match).
+  const summaryEntries: { label: string; target: string }[] = [];
+  if (nameError)
+    summaryEntries.push({ label: 'Pipeline name', target: 'pipeline-name' });
+  roles.forEach((role, i) => {
+    if (cardErrors[i]?.name)
+      summaryEntries.push({
+        label: `Role ${i + 1} name`,
+        target: `role-${i}-name`,
+      });
+    if (cardErrors[i]?.model)
+      summaryEntries.push({
+        label: `Role ${i + 1} model`,
+        target: `role-${i}-model`,
+      });
+    if (role.resolveError)
+      summaryEntries.push({
+        label: `Role ${i + 1} prompt`,
+        target: `role-${i}-prompt`,
+      });
+  });
 
   /** AC-9' D9 routing: a `roles[i]` path marker or a quoted member name that
    * matches exactly one card lands there; everything else is general/name. */
@@ -313,8 +349,10 @@ export function PipelineBuilderModal({
         });
       } else if (err instanceof ApiError) {
         route400(err); // modal stays open, form data retained (AC-9')
+        setErrorEpoch((epoch) => epoch + 1);
       } else {
         setGeneralError('The pipeline save failed unexpectedly.');
+        setErrorEpoch((epoch) => epoch + 1);
       }
     } finally {
       setBusy(false);
@@ -336,6 +374,21 @@ export function PipelineBuilderModal({
         <h2>
           {editing ? `Edit pipeline ${editing.name}` : 'Pipeline builder'}
         </h2>
+        {errorEpoch > 0 &&
+          (summaryEntries.length > 0 || generalError !== null) && (
+            <div className="error-summary" tabIndex={-1} ref={summaryRef}>
+              {summaryEntries.map((entry, i) => (
+                <button
+                  key={`${entry.target}-${i}`}
+                  type="button"
+                  onClick={() => document.getElementById(entry.target)?.focus()}
+                >
+                  {entry.label}
+                </button>
+              ))}
+              {generalError && <span>General error</span>}
+            </div>
+          )}
         <p className="modal-note">
           Rows materialize atomically in ONE save (AP-2): the orchestrator and
           every role row generate their <code className="mono">mode</code>,{' '}

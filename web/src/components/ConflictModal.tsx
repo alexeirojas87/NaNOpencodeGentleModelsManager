@@ -49,31 +49,35 @@ export function ConflictModal({
           Your base <code>{info.expected}</code> · current file{' '}
           <code>{info.actual}</code>
         </p>
-        <table className="diff">
-          <thead>
-            <tr>
-              <th>Key path</th>
-              <th>Dashboard (pending)</th>
-              <th>Config file (current)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+        {/* .table-scroll: long key paths keep the diff inside its own
+            horizontal scroller instead of stretching the modal. */}
+        <div className="table-scroll">
+          <table className="diff">
+            <thead>
               <tr>
-                <td className="mono">—</td>
-                <td colSpan={2}>no pending values differ from the file</td>
+                <th>Key path</th>
+                <th>Dashboard (pending)</th>
+                <th>Config file (current)</th>
               </tr>
-            ) : (
-              rows.map((row) => (
-                <tr key={row.path}>
-                  <td className="mono">{row.path}</td>
-                  <td className="diff-pending">{row.pending}</td>
-                  <td className="diff-current">{row.current}</td>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td className="mono">—</td>
+                  <td colSpan={2}>no pending values differ from the file</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                rows.map((row) => (
+                  <tr key={row.path}>
+                    <td className="mono">{row.path}</td>
+                    <td className="diff-pending">{row.pending}</td>
+                    <td className="diff-current">{row.current}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
         <div className="modal-actions">
           <button
             type="button"

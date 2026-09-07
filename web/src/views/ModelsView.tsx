@@ -601,68 +601,70 @@ export default function ModelsView() {
           </p>
         </div>
       ) : (
-        <table className="models-table">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th>Name</th>
-              <th>Context window</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(models).map(([modelId, entry]) => {
-              const cells = driftFor(selectedProvider, modelId);
-              return (
-                <tr key={modelId} aria-label={modelId}>
-                  <td className="mono">{modelId}</td>
-                  <td>{typeof entry.name === 'string' ? entry.name : '—'}</td>
-                  <td>
-                    {typeof entry.contextWindow === 'number' &&
-                      cells.length === 0 && (
-                        <span className="mono">
-                          {String(entry.contextWindow)}
+        <div className="table-scroll">
+          <table className="models-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Name</th>
+                <th>Context window</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(models).map(([modelId, entry]) => {
+                const cells = driftFor(selectedProvider, modelId);
+                return (
+                  <tr key={modelId} aria-label={modelId}>
+                    <td className="mono">{modelId}</td>
+                    <td>{typeof entry.name === 'string' ? entry.name : '—'}</td>
+                    <td>
+                      {typeof entry.contextWindow === 'number' &&
+                        cells.length === 0 && (
+                          <span className="mono">
+                            {String(entry.contextWindow)}
+                          </span>
+                        )}
+                      {cells.map((cell) => (
+                        <span key={cell.field} className="drift-pair">
+                          <span className="mono">{String(cell.declared)}</span>
+                          <span className="muted">vs snapshot</span>
+                          <span className="mono">{String(cell.snapshot)}</span>
+                          <span
+                            className="chip chip-drift"
+                            title="Advisory only — the declared value is saved verbatim (MC-5)"
+                          >
+                            drift
+                          </span>
                         </span>
-                      )}
-                    {cells.map((cell) => (
-                      <span key={cell.field} className="drift-pair">
-                        <span className="mono">{String(cell.declared)}</span>
-                        <span className="muted">vs snapshot</span>
-                        <span className="mono">{String(cell.snapshot)}</span>
-                        <span
-                          className="chip chip-drift"
-                          title="Advisory only — the declared value is saved verbatim (MC-5)"
-                        >
-                          drift
-                        </span>
-                      </span>
-                    ))}
-                    {typeof entry.contextWindow !== 'number' &&
-                      cells.length === 0 && <span className="muted">—</span>}
-                  </td>
-                  <td className="row-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => openEdit(modelId)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() =>
-                        setConfirming({ provider: selectedProvider, modelId })
-                      }
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                      ))}
+                      {typeof entry.contextWindow !== 'number' &&
+                        cells.length === 0 && <span className="muted">—</span>}
+                    </td>
+                    <td className="row-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => openEdit(modelId)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() =>
+                          setConfirming({ provider: selectedProvider, modelId })
+                        }
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {drawer && (
