@@ -51,7 +51,6 @@ import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
 import { PhaseAgentsInstall } from '../components/roster/PhaseAgentsInstall';
-import { AssignmentsPanel } from '../components/assignments/AssignmentsPanel';
 // phase-agents-v3 (design D7): the roster UI reuses the assignments catalog
 // and chip at their CURRENT paths — the relocation to components/roster/
 // happens in PR-4. CapabilityChip reuse keeps the a11y-gate import alive.
@@ -990,19 +989,11 @@ export default function OrchestrationView() {
       {/* WU9 (OA-3): the sync action the advisory above points at. A
           successful run reloads CONFIG through the generic reload path, so
           the matrix and list reflect whatever gentle-ai sync wrote.
-          role-model-assignment WU-5: the native assignments panel mounts
-          beside it — its Apply composes ONE sync with --profile-phase/
-          --profile flags and shares the SAME reload path (advisory cleared,
-          CONFIG re-GET). */}
+          phase-agents-v3 PR-4: the 2.5 assignments panel no longer mounts —
+          the sync panel is the ONE native sync surface (its Apply composed
+          the dead --profile-phase/--profile flags). */}
       <section className="orch-section">
         <SyncPanel
-          onSynced={() => {
-            setSyncAdvisory(false);
-            void reload();
-          }}
-        />
-        <AssignmentsPanel
-          base={base}
           onSynced={() => {
             setSyncAdvisory(false);
             void reload();

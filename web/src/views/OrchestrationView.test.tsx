@@ -1111,10 +1111,9 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
     });
     await rendered();
     // WU-6 MIGRATION of the pinned legacy flow: reserved `sdd-spec` no
-    // longer takes setModel — the row has NO active picker (S10), and the
-    // assignment leg flows through the panel's ONE native sync (POST
-    // /api/sync). The retained direct-PUT leg is re-anchored on the
-    // user-owned `my-helper` to raise the advisory (S11).
+    // longer takes setModel — the row has NO active picker (S10). The
+    // retained direct-PUT leg is re-anchored on the user-owned `my-helper`
+    // to raise the advisory (S11).
     expect(
       screen.queryByRole('combobox', { name: 'sdd-spec model' }),
     ).toBeNull();
@@ -1130,12 +1129,11 @@ describe('Orchestration — sync panel pass-through re-baselines the list (WU9, 
       screen.getByText('run gentle-ai sync to refresh prompt table'),
     ).toBeTruthy();
 
-    // The assignment leg: apply through the panel — the native sync that IS
-    // that advice; exit 0 clears the advisory once done.
-    fireEvent.change(screen.getByLabelText('assign sdd-spec (deep)'), {
-      target: { value: 'nan/qwen3.6' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply assignments' }));
+    // The clearing leg: the sync panel IS the one native sync surface
+    // (phase-agents-v3 PR-4 removed the 2.5 assignments panel) — its
+    // exit-0 onSynced clears the advisory exactly as the removed panel's
+    // Apply did (same setSyncAdvisory(false) + reload path).
+    fireEvent.click(screen.getByRole('button', { name: 'Run sync' }));
     expect(await screen.findByText('exit 0')).toBeTruthy();
     await waitFor(() =>
       expect(
@@ -1572,8 +1570,8 @@ describe('Orchestration — pipeline create via the toggle closes once and re-re
   });
 });
 
-describe('Orchestration — model assignments panel (WU-5, S1/S2/S4 integration)', () => {
-  it('mounts the assignments section: knowledge rows for the 14 phases + read-only fallback for unknown slugs', async () => {
+describe('Orchestration — legacy assignments panel removed (phase-agents-v3 PR-4, clean removal)', () => {
+  it('renders the view correctly without the 2.5 AssignmentsPanel: no panel surface remains', async () => {
     scriptApi({
       gets: [
         fixture(
@@ -1584,47 +1582,23 @@ describe('Orchestration — model assignments panel (WU-5, S1/S2/S4 integration)
       ],
     });
     await rendered();
-    expect(screen.getByText('Model assignments')).toBeTruthy();
-    const grid = screen.getByRole('table', { name: 'Assignments grid' });
-    // Knowledge rows render for the catalog phases (S1 render leg).
-    for (const slug of ['sdd-init', 'sdd-spec', 'jd-fix-agent']) {
-      expect(within(grid).getByRole('row', { name: slug })).toBeTruthy();
-    }
-    // Unknown config slugs render the generic fallback READ-ONLY (S2/S19).
-    const fallback = within(grid).getByRole('row', { name: 'custom-thing' });
-    expect(within(fallback).getByText(/read-only/)).toBeTruthy();
-    expect(screen.queryByLabelText('assign custom-thing (deep)')).toBeNull();
-  });
-
-  it('panel Apply shares the sync reload path: exit 0 → advisory cleared + exactly 2 CONFIG GETs (S4/S12)', async () => {
-    const { calls } = scriptApi({
-      syncs: [
-        {
-          status: 200,
-          body: {
-            ok: true,
-            exitCode: 0,
-            stdout: '',
-            stderr: '',
-            hash: 'hash-applied',
-          },
-        },
-      ],
-    });
-    await rendered();
-    fireEvent.change(screen.getByLabelText('assign sdd-spec (deep)'), {
-      target: { value: 'nan/mimo-v2.5' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply assignments' }));
-    expect(await screen.findByText('exit 0')).toBeTruthy();
-    await waitFor(() =>
-      expect(
-        screen.queryByText('run gentle-ai sync to refresh prompt table'),
-      ).toBeNull(),
-    );
+    // Every panel-only surface is gone — heading, grid, assign selects
+    // (roster name AND custom variant), and the Apply button (the S1/S2/
+    // S4/S12 surfaces die with the panel; roster knowledge now rides the
+    // picker rows per PR-3).
+    expect(screen.queryByText('Model assignments')).toBeNull();
     expect(
-      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
-    ).toHaveLength(2);
+      screen.queryByRole('table', { name: 'Assignments grid' }),
+    ).toBeNull();
+    expect(screen.queryByLabelText('assign sdd-spec (deep)')).toBeNull();
+    expect(
+      screen.queryByLabelText('assign sdd-custom-thing (deep)'),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Apply assignments' }),
+    ).toBeNull();
+    // …while the surviving sync section still mounts beside SaveBar.
+    expect(screen.getByRole('button', { name: 'Run sync' })).toBeTruthy();
   });
 });
 
