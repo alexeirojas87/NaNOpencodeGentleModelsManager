@@ -21,8 +21,8 @@ import type { AgentPromptResponse } from '../../../shared/types';
 // the checks below keep their exact pinned order and messages).
 import {
   findPipelineOwner,
-  isReserved,
   isReservedV3,
+  isRosterProtected,
   MAX_PROMPT_BYTES,
   NAME_RE,
   NAME_UNSAFE,
@@ -327,20 +327,35 @@ agentsRoute.get('/agents/:name/prompt', async (c) => {
 
 /**
  * Prompt UPDATE for user-owned names (the entry itself stays create-once;
- * only the prompt value moves). Gates: requireAgent 404 → reserved 400
- * (managed prompts never writable) → AC-5 (non-empty inline string, ≤ 64 KiB,
- * WHOLE-STRING `{file:}` rejection — mid-string stays inert text). A
- * pipeline-owned ROLE answers with ONE runSave carrying both the row value-op
- * and the def-map whole write with that roles[].prompt replaced — def/row
- * match post-save (AP-4). The orchestrator prompt is generator-owned: writes
- * on its name 400; the builder save regenerates it.
+ * only the prompt value moves). Gates: requireAgent 404 → roster policy
+ * (phase-agents-v3 D2: at 3.x the 13 roster names are create-once — a
+ * DISTINCT roster_protected 400, model assignment stays available) →
+ * reserved 400 (v3-aware: managed prompts never writable) → AC-5
+ * (non-empty inline string, ≤ 64 KiB, WHOLE-STRING `{file:}` rejection —
+ * mid-string stays inert text). A pipeline-owned ROLE answers with ONE
+ * runSave carrying both the row value-op and the def-map whole write with
+ * that roles[].prompt replaced — def/row match post-save (AP-4). The
+ * orchestrator prompt is generator-owned: writes on its name 400; the
+ * builder save regenerates it.
  */
 agentsRoute.put('/agents/:name/prompt', async (c) => {
   try {
     const body = await readJsonBody(c);
     const name = c.req.param('name');
     const loaded = await requireAgent(name);
-    if (isReserved(name)) {
+    // Route-level roster policy (design D2): 3.x && exact roster name →
+    // roster_protected. In 2.x/unknown this never fires and the name falls
+    // through to the legacy reserved gate — byte-identical semantics.
+    const { mode: versionMode } = await resolveVersion();
+    if (versionMode === '3.x' && isRosterProtected(name)) {
+      throw new HttpError(
+        400,
+        'roster_protected',
+        `Agent "${name}" is a 3.0 phase agent — its prompt is fixed at creation (create-once roster policy); model assignment remains available through the model endpoint.`,
+        { name },
+      );
+    }
+    if (isReservedV3(name, versionMode)) {
       throw new HttpError(
         400,
         'reserved_name',
@@ -430,6 +445,18 @@ agentsRoute.delete('/agents/:name', async (c) => {
     const body = await readJsonBody(c);
     const name = c.req.param('name');
     const loaded = await requireAgent(name); // absent/typo → 404 first
+    // Route-level roster policy (design D2), immediately after requireAgent:
+    // at 3.x a roster name is create-once — deletion is blocked with the
+    // DISTINCT roster_protected code. 2.x/unknown falls through untouched.
+    const { mode: versionMode } = await resolveVersion();
+    if (versionMode === '3.x' && isRosterProtected(name)) {
+      throw new HttpError(
+        400,
+        'roster_protected',
+        `Agent "${name}" is a 3.0 phase agent — deletion is blocked (create-once roster policy); model assignment remains available through the model endpoint.`,
+        { name },
+      );
+    }
     if (!NAME_RE.test(name) || NAME_UNSAFE.has(name)) {
       throw new HttpError(
         400,
@@ -437,7 +464,7 @@ agentsRoute.delete('/agents/:name', async (c) => {
         `"${name}" is not a deletable name — must match ${NAME_RE}.`,
       );
     }
-    if (isReserved(name)) {
+    if (isReservedV3(name, versionMode)) {
       throw new HttpError(
         400,
         'reserved_name',

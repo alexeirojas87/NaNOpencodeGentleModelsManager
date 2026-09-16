@@ -10,11 +10,12 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { app } from '../../server/src/app';
 import { BACKUP_DIR_NAME } from '../../server/src/config/backup';
@@ -33,10 +34,23 @@ const treeOf = (p: string): ConfigTree =>
 let sandbox: string;
 let prevConfigEnv: string | undefined;
 let prevAuthEnv: string | undefined;
+let prevGentleStateEnv: string | undefined;
+let prevGentleBinEnv: string | undefined;
 beforeAll(() => {
   sandbox = mkdtempSync(join(tmpdir(), 'mdash-mutations-'));
   prevConfigEnv = process.env.CONFIG_PATH;
   prevAuthEnv = process.env.AUTH_PATH;
+  // phase-agents-v3 task 1.1 fixture discipline (same rule as routes.test.ts):
+  // version resolution is pinned to a sandbox 2.5.0 state.json so the
+  // route-level v3 gates NEVER spawn a real gentle-ai binary here.
+  prevGentleStateEnv = process.env.GENTLE_AI_STATE_PATH;
+  prevGentleBinEnv = process.env.GENTLE_AI_BIN;
+  writeFileSync(
+    join(sandbox, 'state.json'),
+    JSON.stringify({ installed_binary_version: '2.5.0' }),
+  );
+  process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'state.json');
+  delete process.env.GENTLE_AI_BIN;
   process.env.AUTH_PATH = join(sandbox, 'absent-auth.json');
 });
 afterAll(() => {
@@ -44,8 +58,27 @@ afterAll(() => {
   else process.env.CONFIG_PATH = prevConfigEnv;
   if (prevAuthEnv === undefined) delete process.env.AUTH_PATH;
   else process.env.AUTH_PATH = prevAuthEnv;
+  if (prevGentleStateEnv === undefined) delete process.env.GENTLE_AI_STATE_PATH;
+  else process.env.GENTLE_AI_STATE_PATH = prevGentleStateEnv;
+  if (prevGentleBinEnv === undefined) delete process.env.GENTLE_AI_BIN;
+  else process.env.GENTLE_AI_BIN = prevGentleBinEnv;
   rmSync(sandbox, { recursive: true, force: true });
 });
+afterEach(() => {
+  // Version-fixture overrides never leak between tests.
+  process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'state.json');
+  delete process.env.GENTLE_AI_BIN;
+});
+/** Point GENTLE_AI_STATE_PATH at a sandbox state.json declaring `version`. */
+function stateFixture(version: string): void {
+  const dir = mkdtempSync(join(sandbox, 'state-'));
+  const statePath = join(dir, 'state.json');
+  writeFileSync(
+    statePath,
+    JSON.stringify({ installed_binary_version: version }),
+  );
+  process.env.GENTLE_AI_STATE_PATH = statePath;
+}
 function sandboxConfig(): string {
   const dir = mkdtempSync(join(sandbox, 'case-'));
   const configPath = join(dir, 'opencode.json');
@@ -173,6 +206,8 @@ describe('PUT /api/agents/:name/prompt — user-owned + lockstep (SCW-7 c, AP-4)
     const before = readFileSync(configPath, 'utf8');
     const base = backupsIn(configPath);
     const CASES: [string, unknown, string][] = [
+      // 2.x default fixture (2.5.0): roster names answer reserved_name —
+      // byte-preserved legacy semantics (:176 pin).
       ['sdd-spec', { hash, prompt: 'x' }, 'reserved_name'],
       ['my-helper', { hash, prompt: '{file:./x.md}' }, 'file_ref_rejected'],
       ['my-helper', { hash, prompt: '' }, 'prompt_required'],
@@ -194,6 +229,47 @@ describe('PUT /api/agents/:name/prompt — user-owned + lockstep (SCW-7 c, AP-4)
       expect(readFileSync(configPath, 'utf8')).toBe(before);
       expect(backupsIn(configPath)).toBe(base);
     }
+  });
+
+  it('3.x fixture: prompt PUT on a roster name → 400 roster_protected, NOT reserved_name', async () => {
+    const configPath = sandboxConfig();
+    stateFixture('3.0.0'); // sdd-spec already exists in the fixture config
+    const hash = await seedUserAgent(configPath, 'my-helper');
+    const before = readFileSync(configPath, 'utf8');
+    const base = backupsIn(configPath);
+    const res = await put('/api/agents/sdd-spec/prompt', {
+      hash,
+      prompt: 'try to rewrite the fixed skill-binding prompt',
+    });
+    expect(res.status).toBe(400);
+    const e = (await errOf(res)).error;
+    // DISTINCT code + create-once rationale + model-assignment note (D2).
+    expect(e.code).toBe('roster_protected');
+    expect(e.message).toContain('create-once');
+    expect(e.message).toContain('model');
+    expect(e.message).not.toContain('owned by gentle-ai sync');
+    expect(readFileSync(configPath, 'utf8')).toBe(before); // zero mutation
+    expect(backupsIn(configPath)).toBe(base); // zero backups
+    void hash;
+  });
+
+  it('3.x fixture: unknown-fixture mode still answers reserved_name for roster names', async () => {
+    const configPath = sandboxConfig();
+    // Point at an ABSENT state file with a garbage bin stub → conservative
+    // unknown → legacy semantics byte-preserved (roster gate never fires).
+    const dir = mkdtempSync(join(sandbox, 'state-'));
+    writeFileSync(join(dir, 'fake-gentle-ai.sh'), '#!/bin/sh\nprintf oops\n');
+    const { chmodSync } = await import('node:fs');
+    chmodSync(join(dir, 'fake-gentle-ai.sh'), 0o755);
+    process.env.GENTLE_AI_STATE_PATH = join(dir, 'absent-state.json');
+    process.env.GENTLE_AI_BIN = join(dir, 'fake-gentle-ai.sh');
+    const hash = await seedUserAgent(configPath, 'my-helper');
+    const res = await put('/api/agents/sdd-spec/prompt', {
+      hash,
+      prompt: 'x',
+    });
+    expect(res.status).toBe(400);
+    expect((await errOf(res)).error.code).toBe('reserved_name');
   });
 });
 
@@ -224,6 +300,8 @@ describe('DELETE /api/agents/:name — user-owned standalone only (SCW-7 d)', ()
     for (const [name, code] of [
       ['mypl-build', 'pipeline_owned'],
       ['mypl', 'pipeline_owned'],
+      // 2.x default fixture (2.5.0): roster name → reserved_name — the
+      // :227 pin's legacy semantics, byte-preserved.
       ['sdd-spec', 'reserved_name'],
       ['gentle-orchestrator', 'reserved_name'],
     ] as const) {
@@ -237,6 +315,35 @@ describe('DELETE /api/agents/:name — user-owned standalone only (SCW-7 d)', ()
     }
     expect(readFileSync(configPath, 'utf8')).toBe(before);
     expect(backupsIn(configPath)).toBe(base);
+  });
+
+  it('3.x fixture: DELETE roster name → 400 roster_protected; model PUT on the SAME name → 200', async () => {
+    const configPath = sandboxConfig();
+    stateFixture('3.0.0'); // sdd-spec already exists in the fixture config
+    const before = readFileSync(configPath, 'utf8');
+    const base = backupsIn(configPath);
+    // The create-once policy blocks deletion (spec scenario "Delete blocked")…
+    const res = await del('/api/agents/sdd-spec', {
+      hash: hashOf(configPath),
+    });
+    expect(res.status).toBe(400);
+    const e = (await errOf(res)).error;
+    expect(e.code).toBe('roster_protected');
+    expect(e.message).toContain('create-once');
+    expect(readFileSync(configPath, 'utf8')).toBe(before); // zero mutation
+    expect(backupsIn(configPath)).toBe(base);
+    // …while model assignment stays available (spec scenario "Model edit
+    // allowed" — the model PUT route was never version- or roster-gated).
+    const model = await put('/api/agents/sdd-spec/model', {
+      hash: hashOf(configPath),
+      model: 'nan/qwen3.6',
+    });
+    expect(model.status).toBe(200);
+    const tree = treeOf(configPath);
+    expect(
+      (tree.agent as Record<string, Record<string, unknown>>)['sdd-spec']
+        .model,
+    ).toBe('nan/qwen3.6');
   });
 
   it('unknown name → 404; pipeline member survives (AP-5 is the delete path)', async () => {
