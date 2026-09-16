@@ -1840,6 +1840,68 @@ describe('Orchestration — gentle-ai-owned rows lose direct pickers (WU-4, S10/
   });
 });
 
+// ===== phase-agents-v3 PR-3 (task 4.3) — roster knowledge + advisory chips ==
+// Roster rows carry the phaseKnowledge catalog line and the advisory
+// CapabilityChip — reused from the assignments modules at their CURRENT
+// paths (the relocation to components/roster/ is PR-4). The catalog keys
+// match the roster names plus sdd-onboard, which stays inert metadata: the
+// roster module is the creation authority and excludes it, so sdd-onboard
+// rows render NO knowledge even though the catalog knows the slug.
+describe('Orchestration — roster rows carry phase knowledge + advisory chips (4.3)', () => {
+  it('roster rows render their catalog purpose; variants and sdd-onboard do not', async () => {
+    scriptApi();
+    await rendered();
+    // sdd-spec IS a roster name — its matrix base cell carries the purpose.
+    const purpose = 'Writes strict-format delta specs with scenarios';
+    expect(within(matrixTable()).getByText(purpose)).toBeTruthy();
+    // jd-fix-agent IS roster — the others row carries its purpose too.
+    expect(
+      within(otherTable()).getByText('Applies surgical post-verdict fixes'),
+    ).toBeTruthy();
+    // The purpose renders ONCE per family row: only the roster base cell —
+    // the cheap/deep variant cells are NOT roster names.
+    const specRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-spec',
+    });
+    expect(within(specRow).getAllByText(purpose)).toHaveLength(1);
+    // sdd-onboard is catalog metadata but NOT a roster name — stays inert.
+    expect(
+      within(matrixTable()).getByRole('row', { name: 'sdd-onboard' }),
+    ).toBeTruthy();
+    expect(
+      within(matrixTable()).queryByText(
+        'Walks users through the workflow on the real codebase',
+      ),
+    ).toBeNull();
+  });
+
+  it('the advisory chip compares the declared model against the phase needs', async () => {
+    scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'sdd-explore': { description: 'd', model: 'nan/qwen3.6' },
+            'sdd-apply': { description: 'd', model: 'nan/qwen3.8-flash' },
+          }),
+        ),
+      ],
+    });
+    await rendered();
+    // sdd-explore needs big-context; qwen3.6 declares 262144 < 1M tokens →
+    // the ADVISORY chip renders (advisory never blocking, C1).
+    const exploreRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-explore',
+    });
+    expect(within(exploreRow).getByText(/small context window/)).toBeTruthy();
+    // Missing flags never warn: sdd-apply only needs tools, and qwen3.8-flash
+    // declares no tool_call=false — no chip in that row.
+    const applyRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-apply',
+    });
+    expect(within(applyRow).queryByText('advisory')).toBeNull();
+  });
+});
+
 describe('client-ownership — parity with the server authority (AP-6/AC-3)', () => {
   it('the web predicate copy lists exactly the same reserved surface', () => {
     expect([...CLIENT_PREFIXES].sort()).toEqual([...RESERVED_PREFIXES].sort());
@@ -1903,7 +1965,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       creates: PHASE_AGENT_ROSTER.map((_, i) => okCreate(i + 1)),
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '13 created, 0 already installed, 0 failed — safe to re-run',
@@ -1955,7 +2019,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       creates: Array.from({ length: 13 }, () => AGENT_EXISTS_REPLY),
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '0 created, 13 already installed, 0 failed — safe to re-run',
@@ -1997,14 +2063,15 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
             },
           },
         },
-        ...Array.from(
-          { length: 13 - failAt - 1 },
-          (_, i) => okCreate(failAt + 2 + i),
+        ...Array.from({ length: 13 - failAt - 1 }, (_, i) =>
+          okCreate(failAt + 2 + i),
         ),
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '12 created, 0 already installed, 1 failed — safe to re-run',
@@ -2051,7 +2118,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '13 created, 0 already installed, 0 failed — safe to re-run',
@@ -2078,7 +2147,10 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       status: 409,
       body: {
         ok: false,
-        error: { code: 'stale', message: 'Config changed underneath the install.' },
+        error: {
+          code: 'stale',
+          message: 'Config changed underneath the install.',
+        },
       },
     };
     const { calls } = scriptApi({
@@ -2092,7 +2164,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '12 created, 0 already installed, 1 failed — safe to re-run',
@@ -2125,9 +2199,7 @@ describe('Orchestration — install gating rides StatusResponse.gentleAi (phase-
   it('non-3.x modes render the restart advisory — mode, source, guidance — never the action', async () => {
     scriptApi(); // default status fixture: 2.5.0 / 2.x / state_file
     await rendered();
-    expect(
-      screen.queryByRole('button', { name: INSTALL_BUTTON }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: INSTALL_BUTTON })).toBeNull();
     expect(screen.getByText(/resolved gentle-ai as 2\.x/)).toBeTruthy();
     expect(screen.getByText(/source: state_file/)).toBeTruthy();
     expect(
@@ -2149,9 +2221,7 @@ describe('Orchestration — install gating rides StatusResponse.gentleAi (phase-
       ],
     });
     await rendered();
-    expect(
-      screen.queryByRole('button', { name: INSTALL_BUTTON }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: INSTALL_BUTTON })).toBeNull();
     expect(screen.getByText(/resolved gentle-ai as unknown/)).toBeTruthy();
     expect(screen.getByText(/state_unreadable/)).toBeTruthy();
     expect(

@@ -19,6 +19,7 @@ import type {
   AgentConfigEntry,
   ConfigResponse,
   MaskedProvider,
+  ModelConfig,
   PipelineDefinition,
   StatusResponse,
 } from '../../../shared/types';
@@ -51,6 +52,14 @@ import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
 import { PhaseAgentsInstall } from '../components/roster/PhaseAgentsInstall';
 import { AssignmentsPanel } from '../components/assignments/AssignmentsPanel';
+// phase-agents-v3 (design D7): the roster UI reuses the assignments catalog
+// and chip at their CURRENT paths — the relocation to components/roster/
+// happens in PR-4. CapabilityChip reuse keeps the a11y-gate import alive.
+import { CapabilityChip } from '../components/assignments/CapabilityChip';
+import {
+  knowledgeFor,
+  type PhaseNeed,
+} from '../components/assignments/phaseKnowledge';
 
 /** Pending user choice per agent: string = set, null = clear, absent = untouched. */
 type Edits = Record<string, string | null>;
@@ -119,6 +128,43 @@ function installedPairs(providers: Record<string, MaskedProvider>): string[] {
 
 function declaredModel(entry: AgentConfigEntry | undefined): string | null {
   return typeof entry?.model === 'string' ? entry.model : null;
+}
+
+/** Declared ModelConfig for a "provider/model" pair (chip source). */
+function declaredModelConfig(
+  providers: Record<string, MaskedProvider>,
+  pair: string | null | undefined,
+): ModelConfig | undefined {
+  if (!pair) return undefined;
+  const slash = pair.indexOf('/');
+  if (slash === -1) return undefined;
+  return providers[pair.slice(0, slash)]?.models?.[pair.slice(slash + 1)];
+}
+
+/**
+ * Roster row knowledge (phase-agents-v3 design D7): the phaseKnowledge
+ * purpose line plus the advisory capability chip for the declared model —
+ * reused from the assignments modules at their CURRENT paths (relocation is
+ * PR-4). Renders for the 13 roster names only; sdd-onboard stays inert
+ * catalog metadata (the roster module is the creation authority and
+ * excludes it), and MISSING model flags never warn (absence of evidence is
+ * not evidence).
+ */
+function RosterKnowledge({
+  purpose,
+  model,
+  needs,
+}: {
+  purpose: string;
+  model: ModelConfig | undefined;
+  needs: PhaseNeed[];
+}) {
+  return (
+    <div className="ro-extras">
+      <span className="muted">{purpose}</span>
+      <CapabilityChip model={model} needs={needs} />
+    </div>
+  );
 }
 
 /** Dirty set: edits that actually differ from the current base (per agent). */
@@ -631,24 +677,48 @@ export default function OrchestrationView() {
     // user-owned (exact-roster carve-out) and gain the active picker — the
     // server model PUT was never gated, so this is a client affordance
     // change only. User-owned rows are untouched (S11).
+    // Roster rows carry the phaseKnowledge line + advisory chip in BOTH
+    // branches — the catalog is inert metadata, useful while the row is
+    // read-only (2.x) and beside the active picker (3.x).
+    const knowledge = isRosterProtected(agentName)
+      ? knowledgeFor(agentName)
+      : null;
     if (!isUserOwnedV3(agentName, ownershipMode)) {
       const declared = declaredModel(base.agents[agentName]);
       return (
-        <span className="mono ro-model">{declared ?? 'runtime default'}</span>
+        <>
+          <span className="mono ro-model">{declared ?? 'runtime default'}</span>
+          {knowledge && (
+            <RosterKnowledge
+              purpose={knowledge.purpose}
+              model={declaredModelConfig(base.providers, declared)}
+              needs={knowledge.needs}
+            />
+          )}
+        </>
       );
     }
     // An explicit clear is edits[name] === null — existence, not ??, marks
     // the pending state (null is a legitimate pending value).
+    const declared = declaredModel(base.agents[agentName]);
     const edit = agentName in edits ? (edits[agentName] ?? '') : undefined;
-    const value =
-      edit !== undefined ? edit : (declaredModel(base.agents[agentName]) ?? '');
+    const value = edit !== undefined ? edit : (declared ?? '');
     return (
-      <ModelPicker
-        agentName={agentName}
-        value={value}
-        pairs={pairs}
-        onChange={(next) => setModel(agentName, next)}
-      />
+      <>
+        <ModelPicker
+          agentName={agentName}
+          value={value}
+          pairs={pairs}
+          onChange={(next) => setModel(agentName, next)}
+        />
+        {knowledge && (
+          <RosterKnowledge
+            purpose={knowledge.purpose}
+            model={declaredModelConfig(base.providers, declared)}
+            needs={knowledge.needs}
+          />
+        )}
+      </>
     );
   };
 
@@ -781,9 +851,7 @@ export default function OrchestrationView() {
                               entry={base.agents[name]}
                               onRead={setReader}
                               onEdit={
-                                affordancesFor(name)
-                                  ? setPromptEdit
-                                  : undefined
+                                affordancesFor(name) ? setPromptEdit : undefined
                               }
                               deletable={affordancesFor(name)}
                               onDelete={setAgentConfirm}
