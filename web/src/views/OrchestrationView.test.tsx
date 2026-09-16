@@ -1684,6 +1684,160 @@ describe('Orchestration — gentle-ai-owned rows lose direct pickers (WU-4, S10/
     expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
     expect(picker('my-helper').value).toBe('nan/qwen3.6');
   });
+
+  // phase-agents-v3 task 4.1 (scoped S10 update): the same surface under
+  // version fixtures. At 3.x the 13 exact roster names gain the ACTIVE
+  // picker (design D5/D7 — the server model PUT was never gated, so this is
+  // a client affordance change only); legacy variant rows and the exact
+  // reserved names stay read-only at EVERY version; 2.x/unknown preserve
+  // the S10 semantics pinned above.
+  it('mode 3.x: roster rows gain active pickers, PUT persists, affordances stay suppressed (S10 v3)', async () => {
+    const { calls } = scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'my-helper': {
+              description: 'standalone',
+              prompt: 'Helper prompt.',
+            },
+          }),
+        ),
+      ],
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      puts: [okWrite('echo-roster')],
+      prompts: [
+        {
+          status: 200,
+          body: {
+            name: 'sdd-design',
+            source: 'inline',
+            prompt: 'Design prompt body.',
+          },
+        },
+      ],
+    });
+    await rendered();
+    // Roster rows — a matrix base cell (sdd-spec) and an others row
+    // (jd-judge-a) — offer ONLY the installed catalog.
+    expect(optionValues(picker('sdd-spec'))).toEqual(['', ...INSTALLED_PAIRS]);
+    expect(optionValues(picker('jd-judge-a'))).toEqual([
+      '',
+      ...INSTALLED_PAIRS,
+    ]);
+    // The variant cells in the SAME matrix row stay read-only.
+    expect(
+      within(matrixTable()).queryByRole('combobox', {
+        name: 'sdd-spec-cheap model',
+      }),
+    ).toBeNull();
+    // The choice persists through the unchanged model route.
+    setModel('sdd-spec', 'nan/qwen3.6');
+    expect(screen.getByText('1 change')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Restart OpenCode to apply');
+    const put = writes(calls)[0];
+    expect(put.url).toBe('/api/agents/sdd-spec/model');
+    expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
+    // Create-once is product intent: roster rows NEVER show edit/delete
+    // affordances even at 3.x — but the read-only reader still works.
+    const designRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-design',
+    });
+    expect(
+      within(designRow).getByRole('button', { name: 'view prompt' }),
+    ).toBeTruthy();
+    expect(
+      within(designRow).queryByRole('button', { name: 'edit prompt' }),
+    ).toBeNull();
+    expect(
+      within(designRow).queryByRole('button', { name: 'delete' }),
+    ).toBeNull();
+    fireEvent.click(
+      within(designRow).getByRole('button', { name: 'view prompt' }),
+    );
+    const reader = await screen.findByRole('dialog', {
+      name: 'sdd-design prompt',
+    });
+    expect(within(reader).getByText('Design prompt body.')).toBeTruthy();
+    fireEvent.click(within(reader).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // The suppression is roster-scoped: a user-owned row keeps its full
+    // affordance set at 3.x.
+    const helperRow = within(otherTable()).getByRole('row', {
+      name: 'my-helper',
+    });
+    expect(
+      within(helperRow).getByRole('button', { name: 'edit prompt' }),
+    ).toBeTruthy();
+    expect(
+      within(helperRow).getByRole('button', { name: 'delete' }),
+    ).toBeTruthy();
+  });
+
+  it('mode 3.x: legacy variant rows and exact reserved names stay read-only mono text', async () => {
+    scriptApi({ statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })] });
+    await rendered();
+    // Variant families and the exact reserved names are NOT roster members —
+    // reserved at EVERY version (spec "Legacy variant stays read-only in
+    // 3.x"; the exact-roster carve-out never relaxes a prefix, so the
+    // non-roster sdd-onboard stays read-only too).
+    for (const name of [
+      'sdd-spec-cheap',
+      'sdd-spec-deep',
+      'sdd-orchestrator-cheap',
+      'sdd-orchestrator-deep',
+      'sdd-onboard',
+      'review-validator',
+      'general',
+      'explore',
+      'gentle-orchestrator',
+    ]) {
+      expect(
+        screen.queryByRole('combobox', { name: `${name} model` }),
+      ).toBeNull();
+    }
+    // Declared models still surface as read-only mono text (the span
+    // selector keeps the active picker's <option> texts out of the match).
+    expect(
+      within(
+        within(matrixTable()).getByRole('row', { name: 'sdd-spec' }),
+      ).getByText('nan/qwen3.8-flash', { selector: 'span' }),
+    ).toBeTruthy();
+  });
+
+  it('mode unknown: EVERY reserved row stays read-only — S10 semantics preserved', async () => {
+    scriptApi({
+      statuses: [
+        statusFixture({
+          version: null,
+          mode: 'unknown',
+          source: 'conservative_fallback',
+          detail: 'state_unreadable: state.json could not be parsed.',
+        }),
+      ],
+    });
+    await rendered();
+    // unknown ≡ 2.x (design D4): every reserved row — roster names included —
+    // stays read-only. A status outage degrades the same way (mode null →
+    // 'unknown' in the view), so it can never widen the writable surface.
+    for (const name of [
+      'sdd-spec',
+      'sdd-spec-deep',
+      'sdd-orchestrator-cheap',
+      'sdd-orchestrator-deep',
+      'jd-judge-a',
+      'jd-fix-agent',
+      'review-validator',
+      'general',
+      'explore',
+      'gentle-orchestrator',
+      'sdd-onboard',
+    ]) {
+      expect(
+        screen.queryByRole('combobox', { name: `${name} model` }),
+      ).toBeNull();
+    }
+  });
 });
 
 describe('client-ownership — parity with the server authority (AP-6/AC-3)', () => {

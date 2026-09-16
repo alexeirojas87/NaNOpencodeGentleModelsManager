@@ -32,7 +32,11 @@ import {
   putAgentModel,
   setDefaultAgent,
 } from '../api';
-import { isUserOwned } from '../client-ownership';
+import {
+  isRosterProtected,
+  isUserOwnedV3,
+  type OwnershipMode,
+} from '../client-ownership';
 import { IconFileText, IconList, IconPlus } from '../icons';
 import {
   ConflictModal,
@@ -605,16 +609,29 @@ export default function OrchestrationView() {
     }
   };
 
+  // phase-agents-v3 (design D4/D5): the version-conditional ownership mode.
+  // A missing gentleAi block (server predates the route, or the status read
+  // failed) degrades to 'unknown' — conservatively the 2.x semantics, so a
+  // status outage can never widen the writable surface.
+  const ownershipMode: OwnershipMode = gentleAi?.mode ?? 'unknown';
+  // Roster rows never show edit/delete affordances even at 3.x — create-once
+  // is product intent (design D7); the server roster_protected stays the
+  // authority. The read-only prompt reader is unaffected.
+  const affordancesFor = (name: string): boolean =>
+    isUserOwnedV3(name, ownershipMode) && !isRosterProtected(name);
+
   const pickerNode = (agentName: string) => {
-    // role-model-assignment WU-4 (S10): gentle-ai-owned rows (isReserved —
-    // sdd-*, jd-*, review-*, general, explore, gentle-orchestrator) lose the
-    // direct ModelPicker. A direct agent.<name>.model write is OUTSIDE the
-    // native assignment mechanism: sync deep-merges reserved agents and
-    // would revert the foreign write (dual-truth desync). Their declared
-    // model renders as read-only mono text; assignment flows through the
-    // AssignmentsPanel's POST /api/sync (native --profile-phase/--profile).
-    // User-owned rows are untouched (S11).
-    if (!isUserOwned(agentName)) {
+    // phase-agents-v3 (S10 v3, design D5/D7): rows the v3 predicate does not
+    // own — every reserved row at 2.x/unknown, plus legacy variant families
+    // and the exact reserved names at EVERY mode — lose the direct
+    // ModelPicker. A direct agent.<name>.model write is OUTSIDE the native
+    // assignment mechanism: sync deep-merges reserved agents and would
+    // revert the foreign write (dual-truth desync). Their declared model
+    // renders as read-only mono text. At 3.x the 13 exact roster names ARE
+    // user-owned (exact-roster carve-out) and gain the active picker — the
+    // server model PUT was never gated, so this is a client affordance
+    // change only. User-owned rows are untouched (S11).
+    if (!isUserOwnedV3(agentName, ownershipMode)) {
       const declared = declaredModel(base.agents[agentName]);
       return (
         <span className="mono ro-model">{declared ?? 'runtime default'}</span>
@@ -764,9 +781,11 @@ export default function OrchestrationView() {
                               entry={base.agents[name]}
                               onRead={setReader}
                               onEdit={
-                                isUserOwned(name) ? setPromptEdit : undefined
+                                affordancesFor(name)
+                                  ? setPromptEdit
+                                  : undefined
                               }
-                              deletable={isUserOwned(name)}
+                              deletable={affordancesFor(name)}
                               onDelete={setAgentConfirm}
                             />
                           </>
@@ -888,8 +907,8 @@ export default function OrchestrationView() {
                       agentName={name}
                       entry={base.agents[name]}
                       onRead={setReader}
-                      onEdit={isUserOwned(name) ? setPromptEdit : undefined}
-                      deletable={isUserOwned(name)}
+                      onEdit={affordancesFor(name) ? setPromptEdit : undefined}
+                      deletable={affordancesFor(name)}
                       onDelete={setAgentConfirm}
                     />
                   </td>
