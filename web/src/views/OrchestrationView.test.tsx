@@ -1109,11 +1109,18 @@ import type { PipelineDefinition } from '../../../shared/types';
 import {
   RESERVED_EXACT as CLIENT_EXACT,
   RESERVED_PREFIXES as CLIENT_PREFIXES,
+  isReservedV3 as CLIENT_IS_RESERVED_V3,
+  isRosterProtected as CLIENT_IS_ROSTER_PROTECTED,
+  isUserOwnedV3 as CLIENT_IS_USER_OWNED_V3,
 } from '../client-ownership';
 import {
   RESERVED_EXACT,
   RESERVED_PREFIXES,
+  isReservedV3,
+  isRosterProtected,
+  isUserOwnedV3,
 } from '../../../server/src/config/ownership';
+import { PHASE_AGENT_ROSTER_NAMES } from '../../../shared/roster';
 
 /** One pipeline over the sampleAgents base: mypl + 2 roles (AP-1 def). */
 function pipelineAgents() {
@@ -1636,5 +1643,27 @@ describe('client-ownership — parity with the server authority (AP-6/AC-3)', ()
   it('the web predicate copy lists exactly the same reserved surface', () => {
     expect([...CLIENT_PREFIXES].sort()).toEqual([...RESERVED_PREFIXES].sort());
     expect([...CLIENT_EXACT].sort()).toEqual([...RESERVED_EXACT].sort());
+  });
+
+  // phase-agents-v3 task 3.1 (scoped parity update): the v3 client mirror
+  // must match the server authority ELEMENT-WISE for every roster name in
+  // BOTH version modes — 3.x (roster carve-out active) and 2.x/unknown
+  // (predicate ≡ legacy). The server module is imported for comparison only
+  // (read-only reference); the server's own truth table is pinned by
+  // test/unit/config/ownership.test.ts, this pin stops client drift.
+  it('the v3 mirror matches the server predicate element-wise over roster names × modes', () => {
+    const modes = ['3.x', '2.x', 'unknown'] as const;
+    expect(PHASE_AGENT_ROSTER_NAMES.size).toBe(13);
+    for (const name of PHASE_AGENT_ROSTER_NAMES) {
+      for (const mode of modes) {
+        expect(CLIENT_IS_RESERVED_V3(name, mode)).toBe(
+          isReservedV3(name, mode),
+        );
+        expect(CLIENT_IS_USER_OWNED_V3(name, mode)).toBe(
+          isUserOwnedV3(name, mode),
+        );
+      }
+      expect(CLIENT_IS_ROSTER_PROTECTED(name)).toBe(isRosterProtected(name));
+    }
   });
 });
