@@ -22,6 +22,7 @@ import type { AgentPromptResponse } from '../../../shared/types';
 import {
   findPipelineOwner,
   isReserved,
+  isReservedV3,
   MAX_PROMPT_BYTES,
   NAME_RE,
   NAME_UNSAFE,
@@ -31,6 +32,7 @@ import {
 } from '../config/ownership';
 import type { PatchOp } from '../config/patch';
 import { pipelineDefs } from '../pipelines';
+import { resolveVersion } from '../config/version';
 import {
   HttpError,
   isRecord,
@@ -46,8 +48,11 @@ export const agentsRoute = new Hono();
 
 // --- POST /api/agents gate constants (design D2) ----------------------------
 
-/** AC-4: the ONLY keys a create may carry (first offender is named). */
-const ENTRY_FIELDS = new Set(['model', 'description', 'prompt']);
+/** AC-4: the ONLY keys a create may carry (first offender is named).
+ * phase-agents-v3 (D7): `mode` joins the whitelist — subagent|primary|all. */
+const ENTRY_FIELDS = new Set(['model', 'description', 'prompt', 'mode']);
+/** D7 gate 6b: the mode whitelist. Everything else → 400 mode_invalid. */
+const AGENT_MODES = new Set(['subagent', 'primary', 'all']);
 
 agentsRoute.put('/agents/:name/model', async (c) => {
   try {
@@ -114,11 +119,14 @@ agentsRoute.post('/agents', async (c) => {
         `"${name}" is not a valid agent name — must match ${NAME_RE} and must not be . / .. / __proto__ / constructor / prototype.`,
       );
     }
-    // 4. reserved-name blocklist (case-sensitive, AC-3).
-    if (
-      RESERVED_EXACT.has(name) ||
-      RESERVED_PREFIXES.some((prefix) => name.startsWith(prefix))
-    ) {
+    // 4. reserved-name blocklist (case-sensitive, AC-3) — phase-agents-v3:
+    //    the gate is now the VERSION-GATED predicate (design D5). The
+    //    resolution is memoized per (statePath, binary); at 3.x the 13
+    //    exact roster names pass this gate (the install flow creates them);
+    //    at 2.x/unknown the answer is byte-identical to the legacy check.
+    //    Gate position is PINNED — reserved still precedes every later gate.
+    const { mode: versionMode } = await resolveVersion();
+    if (isReservedV3(name, versionMode)) {
       throw new HttpError(
         400,
         'reserved_name',
@@ -127,16 +135,30 @@ agentsRoute.post('/agents', async (c) => {
     }
     // 5. agent must be a record.
     const entry = recordField(body, 'agent');
-    // 6. entry keys ⊆ {model, description, prompt} — name the first offender.
+    // 6. entry keys ⊆ {model, description, prompt, mode} — name the first.
     for (const key of Object.keys(entry)) {
       if (!ENTRY_FIELDS.has(key)) {
         throw new HttpError(
           400,
           'unknown_field',
-          `agent.${key} is not writable at create — only model, description and prompt are accepted.`,
+          `agent.${key} is not writable at create — only model, description, mode and prompt are accepted.`,
           { field: key },
         );
       }
+    }
+    // 6b. mode, when present, must be a whitelisted agent mode (D7). Sits
+    //     BETWEEN the key-whitelist walk and the prompt gates; gate 4 still
+    //     precedes it, so reserved name + invalid mode → reserved_name first.
+    if (
+      Object.hasOwn(entry, 'mode') &&
+      (typeof entry['mode'] !== 'string' || !AGENT_MODES.has(entry['mode']))
+    ) {
+      throw new HttpError(
+        400,
+        'mode_invalid',
+        `agent.mode "${String(entry['mode'])}" is not a valid agent mode — use subagent, primary or all.`,
+        { field: 'mode' },
+      );
     }
     // 7. prompt: required → string → not a {file:} ref → ≤ 64 KiB (AC-5).
     const prompt = Object.hasOwn(entry, 'prompt') ? entry['prompt'] : undefined;
@@ -191,10 +213,12 @@ agentsRoute.post('/agents', async (c) => {
     }
     // 9. Build the value from the whitelisted fields ONLY, in canonical order
     //    (threat file-write #2: nothing unmentioned can ride along).
+    //    D7: mode joins the canonical build (model, description, mode, prompt).
     const value: Record<string, unknown> = {};
     if (typeof entry['model'] === 'string') value['model'] = entry['model'];
     if (typeof entry['description'] === 'string')
       value['description'] = entry['description'];
+    if (typeof entry['mode'] === 'string') value['mode'] = entry['mode'];
     value['prompt'] = prompt;
     // 10. SCW pipeline (SCW-7 set-only row): patch insert-flag → validate →
     //     backup → atomic rename → {ok,hash}; stale 409 / exists 400 inside.

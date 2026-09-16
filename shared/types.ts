@@ -263,14 +263,22 @@ export interface TemplatesResponse {
 
 /**
  * POST /api/agents body (AC-1): a create-only whole-entry write. `agent`
- * carries only {model?, description?, prompt}; prompt is required, inline
- * and ≤ 64 KiB (AC-4/AC-5). There is deliberately NO update route — the
- * entry is set at creation and never rewritten through the API (OA-4).
+ * carries only {model?, description?, prompt, mode?}; prompt is required,
+ * inline and ≤ 64 KiB (AC-4/AC-5). `mode` is phase-agents-v3 (design D7):
+ * whitelisted server-side to subagent|primary|all — the generic create
+ * modal deliberately has no mode selector. There is deliberately NO update
+ * route — the entry is set at creation and never rewritten through the API
+ * (OA-4).
  */
 export interface CreateAgentRequest {
   hash: string;
   name: string;
-  agent: { model?: string; description?: string; prompt: string };
+  agent: {
+    model?: string;
+    description?: string;
+    prompt: string;
+    mode?: 'subagent' | 'primary' | 'all';
+  };
 }
 
 /**
