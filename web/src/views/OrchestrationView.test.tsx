@@ -1816,8 +1816,8 @@ describe('Orchestration — gentle-ai-owned rows lose direct pickers (WU-4, S10/
 
 // ===== phase-agents-v3 PR-3 (task 4.3) — roster knowledge + advisory chips ==
 // Roster rows carry the phaseKnowledge catalog line and the advisory
-// CapabilityChip — reused from the assignments modules at their CURRENT
-// paths (the relocation to components/roster/ is PR-4). The catalog keys
+// CapabilityChip — reused from the roster modules at their components/
+// roster/ paths (relocated in PR-4). The catalog keys
 // match the roster names plus sdd-onboard, which stays inert metadata: the
 // roster module is the creation authority and excludes it, so sdd-onboard
 // rows render NO knowledge even though the catalog knows the slug.

@@ -824,14 +824,6 @@ html {
   background: var(--bg);
 }
 
-/* Assignments grid: keep the "What it does" column readable instead of
-   crushing to one word per line inside its scroll wrapper (visual-pass
-   moderate #3). */
-.assignments-panel .orch-table th:nth-child(2),
-.assignments-panel .orch-table td:nth-child(2) {
-  min-width: 180px;
-}
-
 .orch-table select {
   background: var(--bg);
   border: 1px solid var(--line);

@@ -8,8 +8,8 @@
 // exactly these), and the knowledge rows condense the installed prompt
 // survey from the exploration (sdd/role-model-assignment/explore §Verified
 // facts). knowledgeFor() NEVER throws: a slug missing from the catalog gets
-// the generic fallback row, which the assignments panel renders read-only
-// (unknown phases are never assignable — D3).
+// the generic fallback row, which roster rows render read-only (unknown
+// slugs are never assignable — D3).
 
 /** Cognitive load of a phase, as surfaced in the assignments grid. */
 export type Load = 'low' | 'medium' | 'medium-high' | 'high';
