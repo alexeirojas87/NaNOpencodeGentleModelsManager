@@ -25,7 +25,12 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentConfigEntry, ConfigResponse } from '../../../shared/types';
+import type {
+  AgentConfigEntry,
+  ConfigResponse,
+  StatusResponse,
+} from '../../../shared/types';
+import { PHASE_AGENT_ROSTER } from '../../../shared/roster';
 import OrchestrationView from './OrchestrationView';
 
 /** The 10 sdd phases as they appear in CONFIG today (data, not a constant the view may assume). */
@@ -147,6 +152,32 @@ function fixture(agents: Record<string, AgentConfigEntry>): ConfigResponse {
   };
 }
 
+/**
+ * Full StatusResponse fixture (phase-agents-v3 PR-2): the sandbox default
+ * resolves 2.5.0/2.x via state_file — the install action stays gated away.
+ * Install-flow tests override `gentleAi` to 3.x (or a fallback shape).
+ */
+function statusFixture(
+  gentleAi?: Partial<StatusResponse['gentleAi']>,
+): StatusResponse {
+  return {
+    path: '/sandbox/opencode.json',
+    hash: 'hash-base-0001',
+    mtime: 1756000000000,
+    drift: [],
+    snapshotAsOf: '2026-09-04',
+    backups: [],
+    restartRequired: false,
+    gentleAi: {
+      version: '2.5.0',
+      mode: '2.x',
+      rosterOwned: false,
+      source: 'state_file',
+      ...gentleAi,
+    },
+  };
+}
+
 interface Call {
   method: string;
   url: string;
@@ -218,6 +249,9 @@ function scriptApi(
     agentDeletes?: { status: number; body: unknown }[];
     /** agent-pipelines WU-4 — PUT /api/config/default-agent queue. */
     defaults?: { status: number; body: unknown }[];
+    /** phase-agents-v3 — GET /api/status (sticky single reply by default;
+     * raw StatusResponse bodies or {status,body} envelopes both accepted). */
+    statuses?: unknown[];
   } = {},
 ) {
   const calls: Call[] = [];
@@ -232,6 +266,7 @@ function scriptApi(
   const pipelineDeletes = [...(opts.pipelineDeletes ?? [])];
   const agentDeletes = [...(opts.agentDeletes ?? [])];
   const defaults = [...(opts.defaults ?? [])];
+  const statuses = [...(opts.statuses ?? [statusFixture()])];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -249,6 +284,18 @@ function scriptApi(
       if (method === 'GET' && url === '/api/config') {
         const next = gets.length > 1 ? gets.shift() : gets[0];
         return json(200, next);
+      }
+      if (method === 'GET' && url === '/api/status') {
+        const next = statuses.length > 1 ? statuses.shift() : statuses[0];
+        if (!next) throw new Error('GET /api/status script exhausted');
+        // Raw StatusResponse bodies (or {status,body} envelopes) both work —
+        // the pipelines-lane pattern.
+        const env = next as { status?: number; body?: unknown };
+        const payload = env && 'body' in env ? env.body : next;
+        return json(
+          env && typeof env.status === 'number' ? env.status : 200,
+          payload,
+        );
       }
       if (method === 'PUT' && /^\/api\/agents\/[^/]+\/model$/.test(url)) {
         const reply = puts.shift();
@@ -1665,5 +1712,298 @@ describe('client-ownership — parity with the server authority (AP-6/AC-3)', ()
       }
       expect(CLIENT_IS_ROSTER_PROTECTED(name)).toBe(isRosterProtected(name));
     }
+  });
+});
+
+// ============ phase-agents-v3 PR-2 (tasks 3.3–3.5) — install flow ===========
+// One click issues EXACTLY 13 sequential POST /api/agents creates in roster
+// order (shared/roster.ts is the single creation authority), bodies
+// {mode:'subagent', prompt, description} with NO model — model assignment is
+// the separate picker flow (PR-3). The AC-7 hash echoed by each 200 chains
+// into the next create; any 400/5xx leaves the hash UNCHANGED (every gate is
+// pre-mutation) so the chain stays valid past failures; `agent_exists` is
+// the idempotency primitive (an already-installed row, zero mutation); a
+// 409 stale refetches GET /api/config ONCE and retries THAT agent once — a
+// second 409 is a failed row. CONTINUE-ALL semantics (design D1): every
+// failure produces a typed row, the run always completes with a terminal
+// summary ("N created, M already installed, K failed — safe to re-run") and
+// a reload() so rosterOwned/pickers refresh (design D7).
+const INSTALL_BUTTON = 'Install 3.0 phase agents';
+const okCreate = (n: number) =>
+  okWrite(`hash-install-${String(n).padStart(2, '0')}`);
+const AGENT_EXISTS_REPLY = {
+  status: 400,
+  body: {
+    ok: false,
+    error: {
+      code: 'agent_exists',
+      message: 'An agent with this name already exists.',
+    },
+  },
+};
+
+describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', () => {
+  it('happy path: exactly 13 sequential creates in roster order, hash-chained, no model field (map row 10)', async () => {
+    const { calls } = scriptApi({
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      creates: PHASE_AGENT_ROSTER.map((_, i) => okCreate(i + 1)),
+    });
+    await rendered();
+    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    expect(
+      await screen.findByText(
+        '13 created, 0 already installed, 0 failed — safe to re-run',
+      ),
+    ).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/agents',
+    );
+    expect(posts).toHaveLength(13);
+    // Roster order + exact bodies: the chain starts at the loaded config
+    // hash, every 200 echo feeds the next create, and NO model is sent.
+    posts.forEach((post, i) => {
+      expect(post.body).toEqual({
+        hash:
+          i === 0
+            ? 'hash-base-0001'
+            : `hash-install-${String(i).padStart(2, '0')}`,
+        name: PHASE_AGENT_ROSTER[i].name,
+        agent: {
+          mode: 'subagent',
+          prompt: PHASE_AGENT_ROSTER[i].prompt,
+          description: PHASE_AGENT_ROSTER[i].description,
+        },
+      });
+    });
+    // Per-agent result rows: one per roster entry, every one `created`.
+    const grid = screen.getByRole('table', { name: 'Install results' });
+    expect(within(grid).getAllByRole('row').length).toBe(14); // header + 13
+    for (const entry of PHASE_AGENT_ROSTER) {
+      const row = within(grid).getByRole('row', { name: entry.name });
+      expect(within(row).getByText('created')).toBeTruthy();
+    }
+    // Completion reload (design D7): mount + the post-install CONFIG re-GET.
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(2);
+  });
+
+  it('re-run idempotency: pre-seeded roster → 13 agent_exists → already-installed rows, zero dupes, hash unchanged (map row 11)', async () => {
+    const seeded: Record<string, AgentConfigEntry> = {};
+    for (const entry of PHASE_AGENT_ROSTER) {
+      seeded[entry.name] = { description: entry.description };
+    }
+    const { calls } = scriptApi({
+      gets: [fixture(sampleAgents(seeded))],
+      statuses: [
+        statusFixture({ version: '3.0.0', mode: '3.x', rosterOwned: true }),
+      ],
+      creates: Array.from({ length: 13 }, () => AGENT_EXISTS_REPLY),
+    });
+    await rendered();
+    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    expect(
+      await screen.findByText(
+        '0 created, 13 already installed, 0 failed — safe to re-run',
+      ),
+    ).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/agents',
+    );
+    expect(posts).toHaveLength(13);
+    // Zero duplicates: each roster name POSTed exactly once, in roster order.
+    expect(posts.map((p) => (p.body as { name: string }).name)).toEqual(
+      PHASE_AGENT_ROSTER.map((e) => e.name),
+    );
+    // agent_exists is pre-mutation (400): the chain hash NEVER moves —
+    // every body still carries the original base hash.
+    for (const post of posts) {
+      expect((post.body as { hash: string }).hash).toBe('hash-base-0001');
+    }
+    const grid = screen.getByRole('table', { name: 'Install results' });
+    for (const entry of PHASE_AGENT_ROSTER) {
+      const row = within(grid).getByRole('row', { name: entry.name });
+      expect(within(row).getByText('already installed')).toBeTruthy();
+    }
+  });
+
+  it('partial failure mid-chain: typed failure row, remaining POSTs still issued, chain stays valid (map row 12)', async () => {
+    const failAt = 6; // sdd-tasks — the 7th roster entry fails
+    const { calls } = scriptApi({
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      creates: [
+        ...Array.from({ length: failAt }, (_, i) => okCreate(i + 1)),
+        {
+          status: 400,
+          body: {
+            ok: false,
+            error: {
+              code: 'mode_invalid',
+              message: 'mode must be one of subagent, primary, all.',
+            },
+          },
+        },
+        ...Array.from(
+          { length: 13 - failAt - 1 },
+          (_, i) => okCreate(failAt + 2 + i),
+        ),
+      ],
+    });
+    await rendered();
+    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    expect(
+      await screen.findByText(
+        '12 created, 0 already installed, 1 failed — safe to re-run',
+      ),
+    ).toBeTruthy();
+    // CONTINUE-ALL: all 13 POSTs are issued in roster order despite the
+    // mid-chain failure.
+    const posts = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/agents',
+    );
+    expect(posts).toHaveLength(13);
+    // The failed create carried the last good hash; the 400 left the chain
+    // UNCHANGED, so the NEXT create chains from the same hash.
+    expect((posts[6].body as { hash: string }).hash).toBe('hash-install-06');
+    expect((posts[7].body as { hash: string }).hash).toBe('hash-install-06');
+    const grid = screen.getByRole('table', { name: 'Install results' });
+    const failed = within(grid).getByRole('row', { name: 'sdd-tasks' });
+    expect(within(failed).getByText('failed')).toBeTruthy();
+    expect(within(failed).getByText(/mode_invalid/)).toBeTruthy();
+  });
+
+  it('409 stale: single config refetch + one retry of THAT agent succeeds; the chain adopts the fresh hash', async () => {
+    const refetched = fixture(sampleAgents());
+    refetched.hash = 'hash-refetched';
+    const { calls } = scriptApi({
+      gets: [fixture(sampleAgents()), refetched],
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      creates: [
+        ...Array.from({ length: 6 }, (_, i) => okCreate(i + 1)),
+        {
+          status: 409,
+          body: {
+            ok: false,
+            error: {
+              code: 'stale',
+              message: 'Config changed underneath the install.',
+              expected: 'hash-install-06',
+              actual: 'hash-refetched',
+            },
+          },
+        },
+        okCreate(7), // the ONE retry of sdd-tasks against the refetched hash
+        ...Array.from({ length: 6 }, (_, i) => okCreate(8 + i)),
+      ],
+    });
+    await rendered();
+    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    expect(
+      await screen.findByText(
+        '13 created, 0 already installed, 0 failed — safe to re-run',
+      ),
+    ).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/agents',
+    );
+    expect(posts).toHaveLength(14); // 13 agents + exactly one retry
+    expect((posts[6].body as { hash: string }).hash).toBe('hash-install-06');
+    expect((posts[7].body as { name: string }).name).toBe('sdd-tasks');
+    expect((posts[7].body as { hash: string }).hash).toBe('hash-refetched');
+    expect((posts[8].body as { hash: string }).hash).toBe('hash-install-07');
+    // Exactly ONE refetch: mount + stale refetch + completion reload.
+    expect(
+      calls.filter((c) => c.method === 'GET' && c.url === '/api/config'),
+    ).toHaveLength(3);
+  });
+
+  it('second 409 on the same agent → typed failed row, run continues to completion', async () => {
+    const refetched = fixture(sampleAgents());
+    refetched.hash = 'hash-refetched';
+    const stale = {
+      status: 409,
+      body: {
+        ok: false,
+        error: { code: 'stale', message: 'Config changed underneath the install.' },
+      },
+    };
+    const { calls } = scriptApi({
+      gets: [fixture(sampleAgents()), refetched],
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      creates: [
+        ...Array.from({ length: 6 }, (_, i) => okCreate(i + 1)),
+        stale, // first attempt
+        stale, // the ONE retry — still stale
+        ...Array.from({ length: 6 }, (_, i) => okCreate(8 + i)),
+      ],
+    });
+    await rendered();
+    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    expect(
+      await screen.findByText(
+        '12 created, 0 already installed, 1 failed — safe to re-run',
+      ),
+    ).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/agents',
+    );
+    expect(posts).toHaveLength(14);
+    // The run CONTINUED after the double-stale: agent 8 still chains from
+    // the refetched hash (a failed retry is pre-mutation — hash unchanged).
+    expect((posts[8].body as { hash: string }).hash).toBe('hash-refetched');
+    const grid = screen.getByRole('table', { name: 'Install results' });
+    const failed = within(grid).getByRole('row', { name: 'sdd-tasks' });
+    expect(within(failed).getByText('failed')).toBeTruthy();
+    expect(within(failed).getByText(/stale/)).toBeTruthy();
+  });
+});
+
+describe('Orchestration — install gating rides StatusResponse.gentleAi (phase-agents-v3 3.5)', () => {
+  it('mode 3.x renders the enabled install action in the header', async () => {
+    scriptApi({ statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })] });
+    await rendered();
+    const button = (await screen.findByRole('button', {
+      name: INSTALL_BUTTON,
+    })) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it('non-3.x modes render the restart advisory — mode, source, guidance — never the action', async () => {
+    scriptApi(); // default status fixture: 2.5.0 / 2.x / state_file
+    await rendered();
+    expect(
+      screen.queryByRole('button', { name: INSTALL_BUTTON }),
+    ).toBeNull();
+    expect(screen.getByText(/resolved gentle-ai as 2\.x/)).toBeTruthy();
+    expect(screen.getByText(/source: state_file/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Restart the dashboard server after installing/upgrading gentle-ai.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('a conservative fallback surfaces its typed detail in the advisory', async () => {
+    scriptApi({
+      statuses: [
+        statusFixture({
+          version: null,
+          mode: 'unknown',
+          source: 'conservative_fallback',
+          detail: 'state_unreadable: state.json could not be parsed.',
+        }),
+      ],
+    });
+    await rendered();
+    expect(
+      screen.queryByRole('button', { name: INSTALL_BUTTON }),
+    ).toBeNull();
+    expect(screen.getByText(/resolved gentle-ai as unknown/)).toBeTruthy();
+    expect(screen.getByText(/state_unreadable/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Restart the dashboard server after installing/upgrading gentle-ai.',
+      ),
+    ).toBeTruthy();
   });
 });

@@ -20,6 +20,7 @@ import type {
   ConfigResponse,
   MaskedProvider,
   PipelineDefinition,
+  StatusResponse,
 } from '../../../shared/types';
 import {
   ApiError,
@@ -27,6 +28,7 @@ import {
   deletePipeline,
   getConfig,
   getPipelines,
+  getStatus,
   putAgentModel,
   setDefaultAgent,
 } from '../api';
@@ -43,6 +45,7 @@ import { PromptEditorModal } from '../components/PromptEditorModal';
 import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
+import { PhaseAgentsInstall } from '../components/roster/PhaseAgentsInstall';
 import { AssignmentsPanel } from '../components/assignments/AssignmentsPanel';
 
 /** Pending user choice per agent: string = set, null = clear, absent = untouched. */
@@ -383,6 +386,13 @@ export default function OrchestrationView() {
   const [promptEdit, setPromptEdit] = useState<string | null>(null);
   const [defaultBusy, setDefaultBusy] = useState(false);
   const [defaultError, setDefaultError] = useState<string | null>(null);
+  // phase-agents-v3 (design D3/D7): the gentle-ai version block is NEW
+  // status plumbing — this view did NOT poll status before; the read rides
+  // the same reload path (below) and degrades to null when the server
+  // predates the route, which renders the install restart advisory.
+  const [gentleAi, setGentleAi] = useState<StatusResponse['gentleAi'] | null>(
+    null,
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -391,6 +401,14 @@ export default function OrchestrationView() {
     } catch (err) {
       // PC-1: error state only — the dashboard never creates or repairs.
       setLoadError(err instanceof Error ? err.message : String(err));
+    }
+    // phase-agents-v3 (D7): the install completion path reloads through
+    // here, so rosterOwned and the resolved mode stay fresh. A failed
+    // status read NEVER blocks the view — it only de-gates the advisory.
+    try {
+      setGentleAi((await getStatus()).gentleAi ?? null);
+    } catch {
+      setGentleAi(null);
     }
   }, []);
 
@@ -647,6 +665,14 @@ export default function OrchestrationView() {
         >
           <IconPlus /> Create agent
         </button>
+        {/* phase-agents-v3 (design D7): the 3.x install action rides
+            StatusResponse.gentleAi — enabled only at 3.x, otherwise the
+            restart advisory; completion reloads through the shared path. */}
+        <PhaseAgentsInstall
+          gentleAi={gentleAi}
+          base={base}
+          onComplete={() => void reload()}
+        />
         {/* AP-7 picker surface: offers ONLY visible primaries (+ clear).
             Action select — it returns to the placeholder after each apply. */}
         <div className="field">
