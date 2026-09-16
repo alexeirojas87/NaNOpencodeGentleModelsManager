@@ -341,8 +341,7 @@ describe('DELETE /api/agents/:name — user-owned standalone only (SCW-7 d)', ()
     expect(model.status).toBe(200);
     const tree = treeOf(configPath);
     expect(
-      (tree.agent as Record<string, Record<string, unknown>>)['sdd-spec']
-        .model,
+      (tree.agent as Record<string, Record<string, unknown>>)['sdd-spec'].model,
     ).toBe('nan/qwen3.6');
   });
 

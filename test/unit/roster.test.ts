@@ -6,9 +6,7 @@
 // prompts ≤ 64 KiB English. Pure unit — no fs, sandbox rule N/A.
 import { describe, expect, it } from 'vitest';
 
-import {
-  MAX_PROMPT_BYTES,
-} from '../../server/src/config/ownership';
+import { MAX_PROMPT_BYTES } from '../../server/src/config/ownership';
 import {
   PHASE_AGENT_ROSTER,
   PHASE_AGENT_ROSTER_NAMES,

@@ -155,7 +155,12 @@ describe('ownership — version-gated v3 predicate (phase-agents-v3, map row 6)'
     for (const name of PHASE_AGENT_ROSTER_NAMES) {
       expect(isRosterProtected(name), name).toBe(true);
     }
-    for (const name of ['sdd-onboard', 'sdd-init-deep', 'sdd-mine', 'general']) {
+    for (const name of [
+      'sdd-onboard',
+      'sdd-init-deep',
+      'sdd-mine',
+      'general',
+    ]) {
       expect(isRosterProtected(name), name).toBe(false);
     }
   });

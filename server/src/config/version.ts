@@ -26,9 +26,7 @@ const execFileAsync = promisify(execFile);
 
 export type VersionMode = '3.x' | '2.x' | 'unknown';
 export type VersionSource =
-  | 'state_file'
-  | 'binary_probe'
-  | 'conservative_fallback';
+  'state_file' | 'binary_probe' | 'conservative_fallback';
 export type VersionErrorCode =
   | 'state_unreadable'
   | 'spawn_not_found'
@@ -239,10 +237,7 @@ export async function resolveVersionWith(opts: {
     }
     return { version: found, mode: modeOf(found), source: 'binary_probe' };
   } catch (err) {
-    const spawnNote =
-      err instanceof VersionError
-        ? err
-        : spawnError(err); // rejections that are not VersionError-shaped
+    const spawnNote = err instanceof VersionError ? err : spawnError(err); // rejections that are not VersionError-shaped
     const detail = [
       stateNote === null ? null : `[${stateNote.code}] ${stateNote.message}`,
       `[${spawnNote.code}] ${spawnNote.message}`,

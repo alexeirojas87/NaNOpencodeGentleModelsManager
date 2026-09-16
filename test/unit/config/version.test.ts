@@ -63,7 +63,9 @@ describe('resolveVersionWith — state file stage (map rows 1–2)', () => {
   it('state file with installed_binary_version 3.0.0 → 3.x state_file; NO spawn', async () => {
     const spawn = spawnSpy();
     const v = await resolveVersionWith({
-      statePath: stateFile(JSON.stringify({ installed_binary_version: '3.0.0' })),
+      statePath: stateFile(
+        JSON.stringify({ installed_binary_version: '3.0.0' }),
+      ),
       binary: 'gentle-ai',
       spawn,
     });
@@ -165,9 +167,15 @@ describe('resolveVersionWith — conservative degradation (map row 4)', () => {
     const v = await resolveVersionWith({
       statePath: join(sandbox, 'absent-3.json'),
       binary: 'gentle-ai',
-      spawn: spawnFailing({ code: 'ENOENT', message: 'spawn gentle-ai ENOENT' }),
+      spawn: spawnFailing({
+        code: 'ENOENT',
+        message: 'spawn gentle-ai ENOENT',
+      }),
     });
-    expect(v).toEqual({ ...CONSERVATIVE, detail: expect.stringContaining('spawn_not_found') });
+    expect(v).toEqual({
+      ...CONSERVATIVE,
+      detail: expect.stringContaining('spawn_not_found'),
+    });
     expect(v.detail).toContain('ENOENT');
   });
 
@@ -266,8 +274,12 @@ describe('resolveVersion — env-driven, memoized per (statePath, binary)', () =
   });
 
   it('a changed (statePath, binary) env pair resolves FRESH (no stale cross-key cache)', async () => {
-    const oldState = stateFile(JSON.stringify({ installed_binary_version: '2.5.0' }));
-    const newState = stateFile(JSON.stringify({ installed_binary_version: '3.0.0' }));
+    const oldState = stateFile(
+      JSON.stringify({ installed_binary_version: '2.5.0' }),
+    );
+    const newState = stateFile(
+      JSON.stringify({ installed_binary_version: '3.0.0' }),
+    );
     const bin = join(sandbox, 'no-spawn-needed.sh');
     writeFileSync(bin, '#!/bin/sh\nprintf "should-never-run"\n');
     chmodSync(bin, 0o755);
@@ -296,10 +308,7 @@ describe('resolveVersionWith — real execFile boundary', () => {
   it('a real stub flooding stdout beyond maxBuffer → spawn_output_limit', async () => {
     const bin = join(sandbox, 'flood-gentle-ai.sh');
     // 2MB on stdout — twice the 1MB cap.
-    writeFileSync(
-      bin,
-      `#!/bin/sh\nperl -e 'print "x" x (1024*1024*2)'\n`,
-    );
+    writeFileSync(bin, `#!/bin/sh\nperl -e 'print "x" x (1024*1024*2)'\n`);
     chmodSync(bin, 0o755);
     const v = await resolveVersionWith({
       statePath: join(sandbox, 'absent-9.json'),
