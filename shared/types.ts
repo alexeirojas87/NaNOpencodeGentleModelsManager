@@ -165,7 +165,9 @@ export interface SyncResponse {
 /**
  * GET /api/status response envelope (design §API-Surface).
  * WU7 fills `drift`/`snapshotAsOf` from the bundled NaN snapshot; `backups`
- * lists restore points newest-first (SCW-4).
+ * lists restore points newest-first (SCW-4). phase-agents-v3 (D3/D9): the
+ * `gentleAi` block is the deliberate, versioned StatusResponse extension —
+ * ConfigResponse stays UNTOUCHED (golden-pinned 7-key shape).
  */
 export interface StatusResponse {
   /** Resolved CONFIG path (sandbox-aware via CONFIG_PATH). */
@@ -182,6 +184,19 @@ export interface StatusResponse {
   backups: string[];
   /** True once this server process has written CONFIG (CX-3 carrier). */
   restartRequired: boolean;
+  /** gentle-ai version + roster state (phase-agents-v3 D3). */
+  gentleAi: {
+    /** Raw resolved version string; null when unresolved. */
+    version: string | null;
+    /** Ownership semantics marker; 'unknown' ≡ 2.x behavior. */
+    mode: '3.x' | '2.x' | 'unknown';
+    /** ALL 13 roster names present in the CONFIG agent map (always fresh). */
+    rosterOwned: boolean;
+    /** Which stage answered: state file, binary probe, or fallback. */
+    source: 'state_file' | 'binary_probe' | 'conservative_fallback';
+    /** Present ONLY on conservative_fallback — typed error text. */
+    detail?: string;
+  };
 }
 
 /**

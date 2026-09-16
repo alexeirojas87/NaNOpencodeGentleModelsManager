@@ -302,6 +302,12 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
     const res = await get('/api/status');
     expect(res.status).toBe(200);
     const body = await res.json();
+    // phase-agents-v3 (:231 scoped golden): the gentleAi block joins the
+    // golden under the DEFAULT 2.5.0 fixture — version from the state file,
+    // mode 2.x, rosterOwned false (the fixture carries only sdd-spec and
+    // jd-judge-a of the 13 exact roster names), source state_file, no
+    // detail (detail exists ONLY on conservative_fallback). The ConfigResponse
+    // 7-key pin stays untouched — the extension is StatusResponse-only (D9).
     expect(body).toEqual({
       path: configPath,
       hash: hashOf(configPath),
@@ -356,6 +362,54 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
       backups: [],
       // No CONFIG write has happened in this process yet (CX-3 carrier).
       restartRequired: false,
+      gentleAi: {
+        version: '2.5.0',
+        mode: '2.x',
+        rosterOwned: false,
+        source: 'state_file',
+      },
+    });
+  });
+
+  it('gentleAi reflects a 3.x override — version, mode and source from the state fixture', async () => {
+    sandboxConfig();
+    stateFixture('3.0.0');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: '3.0.0',
+      mode: '3.x',
+      rosterOwned: false,
+      source: 'state_file',
+    });
+  });
+
+  it('gentleAi degrades conservatively (unknown) via absent state + garbage bin stub — detail names the code', async () => {
+    sandboxConfig();
+    absentStateFixture();
+    stubBinary('totally-unparseable');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: null,
+      mode: 'unknown',
+      rosterOwned: false,
+      source: 'conservative_fallback',
+      // detail is present ONLY on conservative_fallback (D3 contract) and
+      // names the typed failure — the diagnostic channel for "why is
+      // Install disabled?".
+      detail: expect.stringContaining('unparseable'),
+    });
+  });
+
+  it('gentleAi falls through corrupt state to a successful binary probe', async () => {
+    sandboxConfig();
+    corruptStateFixture();
+    stubBinary('3.2.0');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: '3.2.0',
+      mode: '3.x',
+      rosterOwned: false,
+      source: 'binary_probe',
     });
   });
 

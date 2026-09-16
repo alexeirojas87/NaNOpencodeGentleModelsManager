@@ -11,10 +11,12 @@ import { join } from 'node:path';
 import { Hono } from 'hono';
 
 import type { StatusResponse } from '../../../shared/types';
+import { PHASE_AGENT_ROSTER_NAMES } from '../../../shared/roster';
 import { computeDrift, nanSnapshot } from '../catalog';
 import { load } from '../config/load';
 import { defaultBackupDir } from '../config/backup';
-import { respondError, restartRequired } from './http';
+import { resolveVersion } from '../config/version';
+import { isRecord, respondError, restartRequired } from './http';
 
 export const statusRoute = new Hono();
 
@@ -36,6 +38,18 @@ statusRoute.get('/status', async (c) => {
     } catch {
       // no backup dir yet — this CONFIG has never been saved by the dashboard
     }
+    // phase-agents-v3 (D3): version resolution is memoized per
+    // (statePath, binary) inside the version module — this route never
+    // re-spawns. rosterOwned, by contrast, is recomputed PER REQUEST from
+    // the loaded CONFIG (cheap key ⊇ set check — never memoized, so the
+    // install flow's reload() reflects immediately).
+    const gentleAi = await resolveVersion();
+    const agentKeys = isRecord(loaded.tree.agent)
+      ? new Set(Object.keys(loaded.tree.agent))
+      : new Set<string>();
+    const rosterOwned = [...PHASE_AGENT_ROSTER_NAMES].every((name) =>
+      agentKeys.has(name),
+    );
     const body: StatusResponse = {
       path: loaded.path,
       hash: loaded.hash,
@@ -46,6 +60,14 @@ statusRoute.get('/status', async (c) => {
       snapshotAsOf: nanSnapshot.asOf,
       backups,
       restartRequired: restartRequired(),
+      // detail rides along ONLY on conservative_fallback (D3 contract).
+      gentleAi: {
+        version: gentleAi.version,
+        mode: gentleAi.mode,
+        rosterOwned,
+        source: gentleAi.source,
+        ...(gentleAi.detail === undefined ? {} : { detail: gentleAi.detail }),
+      },
     };
     return c.json(body);
   } catch (err) {
