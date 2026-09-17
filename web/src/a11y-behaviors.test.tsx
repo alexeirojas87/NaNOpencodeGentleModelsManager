@@ -29,8 +29,8 @@ import type {
 } from '../../shared/types';
 import { CreateAgentModal } from './components/CreateAgentModal';
 import { PipelineBuilderModal } from './components/PipelineBuilderModal';
-import { CapabilityChip } from './components/assignments/CapabilityChip';
-import type { PhaseNeed } from './components/assignments/phaseKnowledge';
+import { CapabilityChip } from './components/roster/CapabilityChip';
+import type { PhaseNeed } from './components/roster/phaseKnowledge';
 
 const TEMPLATES: { templates: AgentTemplate[] } = {
   templates: [

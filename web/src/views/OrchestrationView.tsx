@@ -51,15 +51,14 @@ import { PromptReaderModal } from '../components/PromptReaderModal';
 import { SaveBar } from '../components/SaveBar';
 import { SyncPanel } from '../components/SyncPanel';
 import { PhaseAgentsInstall } from '../components/roster/PhaseAgentsInstall';
-import { AssignmentsPanel } from '../components/assignments/AssignmentsPanel';
-// phase-agents-v3 (design D7): the roster UI reuses the assignments catalog
-// and chip at their CURRENT paths — the relocation to components/roster/
-// happens in PR-4. CapabilityChip reuse keeps the a11y-gate import alive.
-import { CapabilityChip } from '../components/assignments/CapabilityChip';
+// phase-agents-v3 (design D7): the roster UI reuses the phase catalog and
+// chip, relocated to components/roster/ in PR-4. CapabilityChip reuse keeps
+// the a11y-gate import alive.
+import { CapabilityChip } from '../components/roster/CapabilityChip';
 import {
   knowledgeFor,
   type PhaseNeed,
-} from '../components/assignments/phaseKnowledge';
+} from '../components/roster/phaseKnowledge';
 
 /** Pending user choice per agent: string = set, null = clear, absent = untouched. */
 type Edits = Record<string, string | null>;
@@ -144,8 +143,9 @@ function declaredModelConfig(
 /**
  * Roster row knowledge (phase-agents-v3 design D7): the phaseKnowledge
  * purpose line plus the advisory capability chip for the declared model —
- * reused from the assignments modules at their CURRENT paths (relocation is
- * PR-4). Renders for the 13 roster names only; sdd-onboard stays inert
+ * reused from the roster modules at their components/roster/ paths
+ * (relocated in PR-4). Renders for the 13 roster names only; sdd-onboard
+ * stays inert
  * catalog metadata (the roster module is the creation authority and
  * excludes it), and MISSING model flags never warn (absence of evidence is
  * not evidence).
@@ -990,19 +990,11 @@ export default function OrchestrationView() {
       {/* WU9 (OA-3): the sync action the advisory above points at. A
           successful run reloads CONFIG through the generic reload path, so
           the matrix and list reflect whatever gentle-ai sync wrote.
-          role-model-assignment WU-5: the native assignments panel mounts
-          beside it — its Apply composes ONE sync with --profile-phase/
-          --profile flags and shares the SAME reload path (advisory cleared,
-          CONFIG re-GET). */}
+          phase-agents-v3 PR-4: the 2.5 assignments panel no longer mounts —
+          the sync panel is the ONE native sync surface (its Apply composed
+          the dead --profile-phase/--profile flags). */}
       <section className="orch-section">
         <SyncPanel
-          onSynced={() => {
-            setSyncAdvisory(false);
-            void reload();
-          }}
-        />
-        <AssignmentsPanel
-          base={base}
           onSynced={() => {
             setSyncAdvisory(false);
             void reload();
