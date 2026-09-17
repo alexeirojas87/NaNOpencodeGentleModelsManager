@@ -6,6 +6,7 @@
 // resolved, opened or written by this file. AUTH_PATH gets the same treatment.
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -56,11 +57,25 @@ const tempDirs: string[] = [];
 let sandbox: string;
 let prevConfigEnv: string | undefined;
 let prevAuthEnv: string | undefined;
+let prevGentleStateEnv: string | undefined;
+let prevGentleBinEnv: string | undefined;
 
 beforeAll(() => {
   sandbox = mkdtempSync(join(tmpdir(), 'mdash-routes-'));
   prevConfigEnv = process.env.CONFIG_PATH;
   prevAuthEnv = process.env.AUTH_PATH;
+  // phase-agents-v3 task 1.1 — fixture discipline: GENTLE_AI_STATE_PATH is
+  // pointed at a sandbox state.json (2.5.0 fixture) so version resolution is
+  // deterministic and integration tests NEVER spawn a real gentle-ai binary.
+  // Same save/restore treatment as CONFIG_PATH/AUTH_PATH.
+  prevGentleStateEnv = process.env.GENTLE_AI_STATE_PATH;
+  prevGentleBinEnv = process.env.GENTLE_AI_BIN;
+  writeFileSync(
+    join(sandbox, 'state.json'),
+    JSON.stringify({ installed_binary_version: '2.5.0' }),
+  );
+  process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'state.json');
+  delete process.env.GENTLE_AI_BIN;
   // Safety net: even a forgotten per-test override lands inside the sandbox.
   copyFileSync(FIXTURE_PATH, join(sandbox, 'safety-opencode.json'));
   process.env.CONFIG_PATH = join(sandbox, 'safety-opencode.json');
@@ -71,12 +86,20 @@ afterAll(() => {
   else process.env.CONFIG_PATH = prevConfigEnv;
   if (prevAuthEnv === undefined) delete process.env.AUTH_PATH;
   else process.env.AUTH_PATH = prevAuthEnv;
+  if (prevGentleStateEnv === undefined) delete process.env.GENTLE_AI_STATE_PATH;
+  else process.env.GENTLE_AI_STATE_PATH = prevGentleStateEnv;
+  if (prevGentleBinEnv === undefined) delete process.env.GENTLE_AI_BIN;
+  else process.env.GENTLE_AI_BIN = prevGentleBinEnv;
   rmSync(sandbox, { recursive: true, force: true });
 });
 afterEach(() => {
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop() as string, { recursive: true, force: true });
   }
+  // Version-fixture overrides never leak between tests: every test starts
+  // from the deterministic 2.5.0 default (no binary stub, no spawn).
+  process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'state.json');
+  delete process.env.GENTLE_AI_BIN;
 });
 
 /** Fresh sandbox copy of the fixture, installed as the active CONFIG_PATH. */
@@ -87,6 +110,56 @@ function sandboxConfig(): string {
   copyFileSync(FIXTURE_PATH, configPath);
   process.env.CONFIG_PATH = configPath;
   return configPath;
+}
+
+// --- version-fixture helpers (task 1.1) ------------------------------------
+/**
+ * Point GENTLE_AI_STATE_PATH at a sandbox state.json declaring `version`.
+ * Returns the state path. Deterministic — version resolution reads the file,
+ * never a binary. A distinct path per version also exercises the per-key
+ * version memoization honestly (each fixture pair resolves fresh).
+ */
+function stateFixture(version: string): string {
+  const dir = mkdtempSync(join(sandbox, 'state-'));
+  tempDirs.push(dir);
+  const statePath = join(dir, 'state.json');
+  writeFileSync(
+    statePath,
+    JSON.stringify({ installed_binary_version: version }),
+  );
+  process.env.GENTLE_AI_STATE_PATH = statePath;
+  return statePath;
+}
+
+/** Point GENTLE_AI_STATE_PATH at corrupt (unparseable) state bytes. */
+function corruptStateFixture(): string {
+  const dir = mkdtempSync(join(sandbox, 'state-'));
+  tempDirs.push(dir);
+  const statePath = join(dir, 'state.json');
+  writeFileSync(statePath, '{not valid state json!!');
+  process.env.GENTLE_AI_STATE_PATH = statePath;
+  return statePath;
+}
+
+/** Point GENTLE_AI_STATE_PATH at an ABSENT path (file never exists). */
+function absentStateFixture(): string {
+  process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'absent-state.json');
+  return process.env.GENTLE_AI_STATE_PATH;
+}
+
+/**
+ * Install a stub gentle-ai binary (GENTLE_AI_BIN) whose --version output is
+ * `output`. Only ever a local sh script inside the sandbox — a real
+ * gentle-ai binary is NEVER spawned by these tests (task 1.1 rule).
+ */
+function stubBinary(output: string): string {
+  const dir = mkdtempSync(join(sandbox, 'bin-'));
+  tempDirs.push(dir);
+  const binPath = join(dir, 'fake-gentle-ai.sh');
+  writeFileSync(binPath, `#!/bin/sh\nprintf '%s' '${output}'\n`);
+  chmodSync(binPath, 0o755);
+  process.env.GENTLE_AI_BIN = binPath;
+  return binPath;
 }
 
 // --- request/response helpers ---------------------------------------------

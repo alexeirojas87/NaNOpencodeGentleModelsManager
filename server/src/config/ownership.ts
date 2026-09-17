@@ -13,6 +13,8 @@
 //                    (SCW-7 c/d) uses user-owned; cascade/lockstep (AP-4/AP-5)
 //                    uses pipeline-owned. Helpers are delegated-to, not owned.
 import type { ConfigTree } from './load';
+import type { VersionMode } from './version';
+import { PHASE_AGENT_ROSTER_NAMES } from '../../../shared/roster';
 
 /** Name charset gate (AC-2) — project convention; upstream has none [S1–S4]. */
 export const NAME_RE = /^[\w.-]+$/;
@@ -57,6 +59,40 @@ export function isReserved(name: string): boolean {
 /** AP-6: user-owned is exactly ¬reserved (prefixes and naming stay free). */
 export function isUserOwned(name: string): boolean {
   return !isReserved(name);
+}
+
+// --- phase-agents-v3: version-gated ownership (design Decision 5) -----------
+// The v3 predicate is a PURE function of (name, version mode): at 3.x the 13
+// exact roster names are carved out of the reserved set (user-owned, so the
+// dashboard can create them and the install flow can proceed); legacy
+// variant families (sdd-*-cheap/-deep, jd-*-deep, review-*), RESERVED_EXACT,
+// and every other prefix match stay reserved at EVERY version. At 2.x and
+// unknown the predicate IS the legacy one — byte-identical behavior for
+// existing users (rollback story: zero behavior change off 3.x).
+
+/**
+ * Version-gated reserved predicate (design Decision 5). `mode !== '3.x'` is
+ * exactly the legacy answer; at 3.x the ONLY relaxation is the exact-roster
+ * membership — no prefix relaxation, no provenance markers (rejected by
+ * omission: nothing marker-shaped can enter the carved-out set).
+ */
+export function isReservedV3(name: string, mode: VersionMode): boolean {
+  if (mode !== '3.x') return isReserved(name);
+  return isReserved(name) && !PHASE_AGENT_ROSTER_NAMES.has(name);
+}
+
+/** V3 user-owned: exact inverse of isReservedV3 (AP-6 shape, version-aware). */
+export function isUserOwnedV3(name: string, mode: VersionMode): boolean {
+  return !isReservedV3(name, mode);
+}
+
+/**
+ * Roster policy membership (design Decision 2): the 13 exact phase-agent
+ * names. Independent of the version — the route-level roster_protected hook
+ * checks `mode === '3.x'` itself, keeping this a pure set lookup.
+ */
+export function isRosterProtected(name: string): boolean {
+  return PHASE_AGENT_ROSTER_NAMES.has(name);
 }
 
 /**

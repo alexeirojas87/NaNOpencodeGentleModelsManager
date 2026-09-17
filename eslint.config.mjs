@@ -8,6 +8,11 @@ export default tseslint.config(
       'dist/**',
       'coverage/**',
       '.atl/**',
+      // Untracked agent-tooling dirs (skills/memories/code-graph state):
+      // environment assets, not project source — same category as .atl.
+      '.opencode/**',
+      '.serena/**',
+      '.tokensave/**',
       // Generated offline by tools/gen-schema.ts in WU3; not hand-linted.
       'shared/schema.generated.ts',
     ],
