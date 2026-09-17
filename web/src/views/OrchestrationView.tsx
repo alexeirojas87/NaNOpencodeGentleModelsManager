@@ -57,6 +57,7 @@ import { PhaseAgentsInstall } from '../components/roster/PhaseAgentsInstall';
 import { CapabilityChip } from '../components/roster/CapabilityChip';
 import {
   knowledgeFor,
+  type Load,
   type PhaseNeed,
 } from '../components/roster/phaseKnowledge';
 
@@ -152,16 +153,21 @@ function declaredModelConfig(
  */
 function RosterKnowledge({
   purpose,
+  load,
   model,
   needs,
 }: {
   purpose: string;
+  load: Load;
   model: ModelConfig | undefined;
   needs: PhaseNeed[];
 }) {
   return (
     <div className="ro-extras">
       <span className="muted">{purpose}</span>
+      <span className="mono ro-load" title="How powerful the model needs to be for this phase">
+        ⚡ model demand: {load}
+      </span>
       <CapabilityChip model={model} needs={needs} />
     </div>
   );
@@ -691,6 +697,7 @@ export default function OrchestrationView() {
           {knowledge && (
             <RosterKnowledge
               purpose={knowledge.purpose}
+              load={knowledge.load}
               model={declaredModelConfig(base.providers, declared)}
               needs={knowledge.needs}
             />
@@ -714,6 +721,7 @@ export default function OrchestrationView() {
         {knowledge && (
           <RosterKnowledge
             purpose={knowledge.purpose}
+            load={knowledge.load}
             model={declaredModelConfig(base.providers, declared)}
             needs={knowledge.needs}
           />

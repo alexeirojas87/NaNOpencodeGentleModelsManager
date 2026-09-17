@@ -1849,6 +1849,28 @@ describe('Orchestration — roster rows carry phase knowledge + advisory chips (
     ).toBeNull();
   });
 
+  it('roster rows render the catalog model demand of their phase', async () => {
+    scriptApi();
+    await rendered();
+    // The badge reuses the catalog load as-is — sdd-spec is 'high'.
+    const specRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-spec',
+    });
+    expect(within(specRow).getByText(/model demand: high/)).toBeTruthy();
+    // sdd-tasks is 'medium-high': the hyphenated value must survive intact
+    // (a substring match against 'high' would pass even if it were dropped).
+    const tasksRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-tasks',
+    });
+    expect(within(tasksRow).getByText(/model demand: medium-high/)).toBeTruthy();
+    // sdd-onboard is catalog metadata but NOT a roster name — its row carries
+    // no knowledge block at all, so no demand badge either.
+    const onboardRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-onboard',
+    });
+    expect(within(onboardRow).queryByText(/model demand:/)).toBeNull();
+  });
+
   it('the advisory chip compares the declared model against the phase needs', async () => {
     scriptApi({
       gets: [
