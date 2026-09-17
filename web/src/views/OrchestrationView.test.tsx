@@ -1684,6 +1684,222 @@ describe('Orchestration — gentle-ai-owned rows lose direct pickers (WU-4, S10/
     expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
     expect(picker('my-helper').value).toBe('nan/qwen3.6');
   });
+
+  // phase-agents-v3 task 4.1 (scoped S10 update): the same surface under
+  // version fixtures. At 3.x the 13 exact roster names gain the ACTIVE
+  // picker (design D5/D7 — the server model PUT was never gated, so this is
+  // a client affordance change only); legacy variant rows and the exact
+  // reserved names stay read-only at EVERY version; 2.x/unknown preserve
+  // the S10 semantics pinned above.
+  it('mode 3.x: roster rows gain active pickers, PUT persists, affordances stay suppressed (S10 v3)', async () => {
+    const { calls } = scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'my-helper': {
+              description: 'standalone',
+              prompt: 'Helper prompt.',
+            },
+          }),
+        ),
+      ],
+      statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })],
+      puts: [okWrite('echo-roster')],
+      prompts: [
+        {
+          status: 200,
+          body: {
+            name: 'sdd-design',
+            source: 'inline',
+            prompt: 'Design prompt body.',
+          },
+        },
+      ],
+    });
+    await rendered();
+    // Roster rows — a matrix base cell (sdd-spec) and an others row
+    // (jd-judge-a) — offer ONLY the installed catalog.
+    expect(optionValues(picker('sdd-spec'))).toEqual(['', ...INSTALLED_PAIRS]);
+    expect(optionValues(picker('jd-judge-a'))).toEqual([
+      '',
+      ...INSTALLED_PAIRS,
+    ]);
+    // The variant cells in the SAME matrix row stay read-only.
+    expect(
+      within(matrixTable()).queryByRole('combobox', {
+        name: 'sdd-spec-cheap model',
+      }),
+    ).toBeNull();
+    // The choice persists through the unchanged model route.
+    setModel('sdd-spec', 'nan/qwen3.6');
+    expect(screen.getByText('1 change')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Restart OpenCode to apply');
+    const put = writes(calls)[0];
+    expect(put.url).toBe('/api/agents/sdd-spec/model');
+    expect(put.body).toEqual({ hash: 'hash-base-0001', model: 'nan/qwen3.6' });
+    // Create-once is product intent: roster rows NEVER show edit/delete
+    // affordances even at 3.x — but the read-only reader still works.
+    const designRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-design',
+    });
+    expect(
+      within(designRow).getByRole('button', { name: 'view prompt' }),
+    ).toBeTruthy();
+    expect(
+      within(designRow).queryByRole('button', { name: 'edit prompt' }),
+    ).toBeNull();
+    expect(
+      within(designRow).queryByRole('button', { name: 'delete' }),
+    ).toBeNull();
+    fireEvent.click(
+      within(designRow).getByRole('button', { name: 'view prompt' }),
+    );
+    const reader = await screen.findByRole('dialog', {
+      name: 'sdd-design prompt',
+    });
+    expect(within(reader).getByText('Design prompt body.')).toBeTruthy();
+    fireEvent.click(within(reader).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // The suppression is roster-scoped: a user-owned row keeps its full
+    // affordance set at 3.x.
+    const helperRow = within(otherTable()).getByRole('row', {
+      name: 'my-helper',
+    });
+    expect(
+      within(helperRow).getByRole('button', { name: 'edit prompt' }),
+    ).toBeTruthy();
+    expect(
+      within(helperRow).getByRole('button', { name: 'delete' }),
+    ).toBeTruthy();
+  });
+
+  it('mode 3.x: legacy variant rows and exact reserved names stay read-only mono text', async () => {
+    scriptApi({ statuses: [statusFixture({ version: '3.0.0', mode: '3.x' })] });
+    await rendered();
+    // Variant families and the exact reserved names are NOT roster members —
+    // reserved at EVERY version (spec "Legacy variant stays read-only in
+    // 3.x"; the exact-roster carve-out never relaxes a prefix, so the
+    // non-roster sdd-onboard stays read-only too).
+    for (const name of [
+      'sdd-spec-cheap',
+      'sdd-spec-deep',
+      'sdd-orchestrator-cheap',
+      'sdd-orchestrator-deep',
+      'sdd-onboard',
+      'review-validator',
+      'general',
+      'explore',
+      'gentle-orchestrator',
+    ]) {
+      expect(
+        screen.queryByRole('combobox', { name: `${name} model` }),
+      ).toBeNull();
+    }
+    // Declared models still surface as read-only mono text (the span
+    // selector keeps the active picker's <option> texts out of the match).
+    expect(
+      within(
+        within(matrixTable()).getByRole('row', { name: 'sdd-spec' }),
+      ).getByText('nan/qwen3.8-flash', { selector: 'span' }),
+    ).toBeTruthy();
+  });
+
+  it('mode unknown: EVERY reserved row stays read-only — S10 semantics preserved', async () => {
+    scriptApi({
+      statuses: [
+        statusFixture({
+          version: null,
+          mode: 'unknown',
+          source: 'conservative_fallback',
+          detail: 'state_unreadable: state.json could not be parsed.',
+        }),
+      ],
+    });
+    await rendered();
+    // unknown ≡ 2.x (design D4): every reserved row — roster names included —
+    // stays read-only. A status outage degrades the same way (mode null →
+    // 'unknown' in the view), so it can never widen the writable surface.
+    for (const name of [
+      'sdd-spec',
+      'sdd-spec-deep',
+      'sdd-orchestrator-cheap',
+      'sdd-orchestrator-deep',
+      'jd-judge-a',
+      'jd-fix-agent',
+      'review-validator',
+      'general',
+      'explore',
+      'gentle-orchestrator',
+      'sdd-onboard',
+    ]) {
+      expect(
+        screen.queryByRole('combobox', { name: `${name} model` }),
+      ).toBeNull();
+    }
+  });
+});
+
+// ===== phase-agents-v3 PR-3 (task 4.3) — roster knowledge + advisory chips ==
+// Roster rows carry the phaseKnowledge catalog line and the advisory
+// CapabilityChip — reused from the assignments modules at their CURRENT
+// paths (the relocation to components/roster/ is PR-4). The catalog keys
+// match the roster names plus sdd-onboard, which stays inert metadata: the
+// roster module is the creation authority and excludes it, so sdd-onboard
+// rows render NO knowledge even though the catalog knows the slug.
+describe('Orchestration — roster rows carry phase knowledge + advisory chips (4.3)', () => {
+  it('roster rows render their catalog purpose; variants and sdd-onboard do not', async () => {
+    scriptApi();
+    await rendered();
+    // sdd-spec IS a roster name — its matrix base cell carries the purpose.
+    const purpose = 'Writes strict-format delta specs with scenarios';
+    expect(within(matrixTable()).getByText(purpose)).toBeTruthy();
+    // jd-fix-agent IS roster — the others row carries its purpose too.
+    expect(
+      within(otherTable()).getByText('Applies surgical post-verdict fixes'),
+    ).toBeTruthy();
+    // The purpose renders ONCE per family row: only the roster base cell —
+    // the cheap/deep variant cells are NOT roster names.
+    const specRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-spec',
+    });
+    expect(within(specRow).getAllByText(purpose)).toHaveLength(1);
+    // sdd-onboard is catalog metadata but NOT a roster name — stays inert.
+    expect(
+      within(matrixTable()).getByRole('row', { name: 'sdd-onboard' }),
+    ).toBeTruthy();
+    expect(
+      within(matrixTable()).queryByText(
+        'Walks users through the workflow on the real codebase',
+      ),
+    ).toBeNull();
+  });
+
+  it('the advisory chip compares the declared model against the phase needs', async () => {
+    scriptApi({
+      gets: [
+        fixture(
+          sampleAgents({
+            'sdd-explore': { description: 'd', model: 'nan/qwen3.6' },
+            'sdd-apply': { description: 'd', model: 'nan/qwen3.8-flash' },
+          }),
+        ),
+      ],
+    });
+    await rendered();
+    // sdd-explore needs big-context; qwen3.6 declares 262144 < 1M tokens →
+    // the ADVISORY chip renders (advisory never blocking, C1).
+    const exploreRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-explore',
+    });
+    expect(within(exploreRow).getByText(/small context window/)).toBeTruthy();
+    // Missing flags never warn: sdd-apply only needs tools, and qwen3.8-flash
+    // declares no tool_call=false — no chip in that row.
+    const applyRow = within(matrixTable()).getByRole('row', {
+      name: 'sdd-apply',
+    });
+    expect(within(applyRow).queryByText('advisory')).toBeNull();
+  });
 });
 
 describe('client-ownership — parity with the server authority (AP-6/AC-3)', () => {
@@ -1749,7 +1965,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       creates: PHASE_AGENT_ROSTER.map((_, i) => okCreate(i + 1)),
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '13 created, 0 already installed, 0 failed — safe to re-run',
@@ -1801,7 +2019,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       creates: Array.from({ length: 13 }, () => AGENT_EXISTS_REPLY),
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '0 created, 13 already installed, 0 failed — safe to re-run',
@@ -1843,14 +2063,15 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
             },
           },
         },
-        ...Array.from(
-          { length: 13 - failAt - 1 },
-          (_, i) => okCreate(failAt + 2 + i),
+        ...Array.from({ length: 13 - failAt - 1 }, (_, i) =>
+          okCreate(failAt + 2 + i),
         ),
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '12 created, 0 already installed, 1 failed — safe to re-run',
@@ -1897,7 +2118,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '13 created, 0 already installed, 0 failed — safe to re-run',
@@ -1924,7 +2147,10 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       status: 409,
       body: {
         ok: false,
-        error: { code: 'stale', message: 'Config changed underneath the install.' },
+        error: {
+          code: 'stale',
+          message: 'Config changed underneath the install.',
+        },
       },
     };
     const { calls } = scriptApi({
@@ -1938,7 +2164,9 @@ describe('Orchestration — 3.0 phase agents install (phase-agents-v3 PR-2)', ()
       ],
     });
     await rendered();
-    fireEvent.click(await screen.findByRole('button', { name: INSTALL_BUTTON }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: INSTALL_BUTTON }),
+    );
     expect(
       await screen.findByText(
         '12 created, 0 already installed, 1 failed — safe to re-run',
@@ -1971,9 +2199,7 @@ describe('Orchestration — install gating rides StatusResponse.gentleAi (phase-
   it('non-3.x modes render the restart advisory — mode, source, guidance — never the action', async () => {
     scriptApi(); // default status fixture: 2.5.0 / 2.x / state_file
     await rendered();
-    expect(
-      screen.queryByRole('button', { name: INSTALL_BUTTON }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: INSTALL_BUTTON })).toBeNull();
     expect(screen.getByText(/resolved gentle-ai as 2\.x/)).toBeTruthy();
     expect(screen.getByText(/source: state_file/)).toBeTruthy();
     expect(
@@ -1995,9 +2221,7 @@ describe('Orchestration — install gating rides StatusResponse.gentleAi (phase-
       ],
     });
     await rendered();
-    expect(
-      screen.queryByRole('button', { name: INSTALL_BUTTON }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: INSTALL_BUTTON })).toBeNull();
     expect(screen.getByText(/resolved gentle-ai as unknown/)).toBeTruthy();
     expect(screen.getByText(/state_unreadable/)).toBeTruthy();
     expect(
