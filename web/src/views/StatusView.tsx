@@ -12,7 +12,10 @@
 //     distinguishes them from gentle-ai's own ~/.gentle-ai/backups;
 //   · restartRequired: the process-local CX-3 carrier — shown as the
 //     server's current answer, with no local dismiss (this is a status,
-//     not an ephemeral toast; Refresh re-reads it).
+//     not an ephemeral toast; Refresh re-reads it);
+//   · overrides: higher-precedence OpenCode layers (OPENCODE_CONFIG_DIR, a
+//     sibling opencode.jsonc) that would silently win over the managed
+//     CONFIG — rendered as a warning panel only when the server reports any.
 // The load-error panel is the PC-1 parity pattern of the other views:
 // a missing (404 config_missing) or unparseable (422 config_unparseable)
 // CONFIG surfaces the server's honest message with a Retry — the
@@ -101,6 +104,36 @@ export default function StatusView() {
           No restart pending — this server process has not written CONFIG since
           it started.
         </p>
+      )}
+
+      {status.overrides.length > 0 && (
+        // Higher-precedence layers: a write here can look saved and still be
+        // overridden at runtime, so this warning must precede the identity
+        // panel — the user should read it before trusting any save.
+        <section className="panel error-panel" aria-label="Config overrides">
+          <h3>Higher-precedence layers override CONFIG</h3>
+          <p>
+            OpenCode loads the layers listed below AFTER the global config, so
+            they override the file this dashboard manages. A save here can look
+            successful and still be overridden at runtime.
+          </p>
+          <ul>
+            {status.overrides.map((override) => (
+              <li key={`${override.kind}:${override.path}`}>
+                <span className="mono">{override.path}</span> —{' '}
+                {override.reason}
+              </li>
+            ))}
+          </ul>
+          <p>
+            Fix: remove the duplicated <code className="mono">agent</code> block
+            from that file, or unset{' '}
+            <code className="mono">OPENCODE_CONFIG_DIR</code>. Running{' '}
+            <code className="mono">gentle-ai</code> from a shell that exports{' '}
+            <code className="mono">OPENCODE_CONFIG_DIR</code> is how such a
+            duplicate gets written.
+          </p>
+        </section>
       )}
 
       <section className="panel" aria-label="CONFIG identity">

@@ -4,7 +4,9 @@
 // and the process-local restart flag (CX-3 carrier). Since WU7 the drift[]
 // and snapshotAsOf report REAL cells: declared-vs-snapshot contextWindow
 // comparisons from the bundled catalog — advisory only, never blocking
-// (MC-5: the save pipeline never consults this endpoint).
+// (MC-5: the save pipeline never consults this endpoint). The overrides[]
+// list names higher-precedence OpenCode layers that would silently win over
+// the managed CONFIG (see config/layers.ts).
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -14,6 +16,7 @@ import type { StatusResponse } from '../../../shared/types';
 import { PHASE_AGENT_ROSTER_NAMES } from '../../../shared/roster';
 import { computeDrift, nanSnapshot } from '../catalog';
 import { load } from '../config/load';
+import { detectOverrides } from '../config/layers';
 import { defaultBackupDir } from '../config/backup';
 import { resolveVersion } from '../config/version';
 import { isRecord, respondError, restartRequired } from './http';
@@ -54,6 +57,9 @@ statusRoute.get('/status', async (c) => {
       path: loaded.path,
       hash: loaded.hash,
       mtime: loaded.mtimeMs,
+      // Higher-precedence layers that would silently override CONFIG — the
+      // dashboard-managed file is only honest if nothing outranks it.
+      overrides: detectOverrides(process.env, loaded.path),
       // Advisory cells only (MC-5) — providers that do not match the
       // snapshot's npm+name metadata contribute nothing (generic 0..N).
       drift: computeDrift(loaded.tree),

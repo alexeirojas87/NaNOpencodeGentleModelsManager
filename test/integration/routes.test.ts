@@ -60,11 +60,17 @@ let prevConfigEnv: string | undefined;
 let prevAuthEnv: string | undefined;
 let prevGentleStateEnv: string | undefined;
 let prevGentleBinEnv: string | undefined;
+// OPENCODE_CONFIG_DIR is the higher-precedence layer under test — it must
+// never leak into an unrelated case (it would add an override to every
+// golden), so beforeAll clears it and afterEach re-clears it.
+let prevConfigDirEnv: string | undefined;
 
 beforeAll(() => {
   sandbox = mkdtempSync(join(tmpdir(), 'mdash-routes-'));
   prevConfigEnv = process.env.CONFIG_PATH;
   prevAuthEnv = process.env.AUTH_PATH;
+  prevConfigDirEnv = process.env.OPENCODE_CONFIG_DIR;
+  delete process.env.OPENCODE_CONFIG_DIR;
   // phase-agents-v3 task 1.1 — fixture discipline: GENTLE_AI_STATE_PATH is
   // pointed at a sandbox state.json (2.5.0 fixture) so version resolution is
   // deterministic and integration tests NEVER spawn a real gentle-ai binary.
@@ -91,6 +97,8 @@ afterAll(() => {
   else process.env.GENTLE_AI_STATE_PATH = prevGentleStateEnv;
   if (prevGentleBinEnv === undefined) delete process.env.GENTLE_AI_BIN;
   else process.env.GENTLE_AI_BIN = prevGentleBinEnv;
+  if (prevConfigDirEnv === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+  else process.env.OPENCODE_CONFIG_DIR = prevConfigDirEnv;
   rmSync(sandbox, { recursive: true, force: true });
 });
 afterEach(() => {
@@ -101,6 +109,7 @@ afterEach(() => {
   // from the deterministic 2.5.0 default (no binary stub, no spawn).
   process.env.GENTLE_AI_STATE_PATH = join(sandbox, 'state.json');
   delete process.env.GENTLE_AI_BIN;
+  delete process.env.OPENCODE_CONFIG_DIR;
 });
 
 /** Fresh sandbox copy of the fixture, installed as the active CONFIG_PATH. */
@@ -312,6 +321,9 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
       path: configPath,
       hash: hashOf(configPath),
       mtime: Math.trunc(statSync(configPath).mtimeMs),
+      // No higher-precedence layer is present: the sandbox dir holds no
+      // opencode.jsonc sibling and beforeAll clears OPENCODE_CONFIG_DIR.
+      overrides: [],
       // Golden: the fixture's nan provider matches the snapshot metadata, so
       // exactly its 5 differing contextWindow declarations surface, in
       // insertion order. Aligned qwen3.6 produces no cell; headroom and
@@ -431,6 +443,55 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
         .map((n) => join(dir, BACKUP_DIR_NAME, n)),
     );
     expect(backups.length).toBe(1);
+  });
+});
+
+// --- GET /api/status — higher-precedence layer warnings ---------------------
+describe('GET /api/status — higher-precedence OpenCode layer warnings', () => {
+  it('reports OPENCODE_CONFIG_DIR when it points at a different directory', async () => {
+    sandboxConfig();
+    const overrideDir = mkdtempSync(join(sandbox, 'override-'));
+    tempDirs.push(overrideDir);
+    process.env.OPENCODE_CONFIG_DIR = overrideDir;
+    // No config file inside the dir yet → the directory itself is reported.
+    const body = await (await get('/api/status')).json();
+    expect(body['overrides']).toEqual([
+      {
+        kind: 'config_dir_env',
+        path: overrideDir,
+        reason: expect.stringContaining('OPENCODE_CONFIG_DIR'),
+      },
+    ]);
+    // Once the layer has its own config file, the FILE path is reported.
+    writeFileSync(join(overrideDir, 'opencode.jsonc'), '{}');
+    const withFile = await (await get('/api/status')).json();
+    expect(withFile['overrides']).toEqual([
+      {
+        kind: 'config_dir_env',
+        path: join(overrideDir, 'opencode.jsonc'),
+        reason: expect.stringContaining('OPENCODE_CONFIG_DIR'),
+      },
+    ]);
+  });
+
+  it('reports nothing when no higher layer exists (unset env, no sibling)', async () => {
+    sandboxConfig();
+    const body = await (await get('/api/status')).json();
+    expect(body['overrides']).toEqual([]);
+  });
+
+  it('reports a sibling opencode.jsonc beside the managed opencode.json', async () => {
+    const configPath = sandboxConfig();
+    const dir = dirname(configPath);
+    writeFileSync(join(dir, 'opencode.jsonc'), '{}');
+    const body = await (await get('/api/status')).json();
+    expect(body['overrides']).toEqual([
+      {
+        kind: 'jsonc_sibling',
+        path: join(dir, 'opencode.jsonc'),
+        reason: expect.stringContaining('opencode.jsonc'),
+      },
+    ]);
   });
 });
 

@@ -163,6 +163,20 @@ export interface SyncResponse {
 }
 
 /**
+ * One OpenCode config layer that OUTRANKS the managed CONFIG (higher
+ * precedence, loaded later). Surfaced so the dashboard never claims a save
+ * that a higher layer would silently override.
+ */
+export interface ConfigOverride {
+  /** Which OpenCode layer would win over the managed CONFIG. */
+  kind: 'config_dir_env' | 'jsonc_sibling';
+  /** Absolute path of the winning layer (its config file, or the directory). */
+  path: string;
+  /** Machine-stable reason it wins (English). */
+  reason: string;
+}
+
+/**
  * GET /api/status response envelope (design §API-Surface).
  * WU7 fills `drift`/`snapshotAsOf` from the bundled NaN snapshot; `backups`
  * lists restore points newest-first (SCW-4). phase-agents-v3 (D3/D9): the
@@ -176,6 +190,9 @@ export interface StatusResponse {
   hash: string;
   /** CONFIG mtime in epoch milliseconds. */
   mtime: number;
+  /** Higher-precedence OpenCode layers that override the managed CONFIG; an
+   * empty array means nothing overrides CONFIG. */
+  overrides: ConfigOverride[];
   /** Declared-vs-snapshot drift cells (WU7) — advisory only, never blocks. */
   drift: DriftCell[];
   /** `asOf` of the bundled snapshot; null only if the bundle were absent. */

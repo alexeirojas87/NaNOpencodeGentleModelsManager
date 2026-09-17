@@ -164,6 +164,7 @@ function statusFixture(
     path: '/sandbox/opencode.json',
     hash: 'hash-base-0001',
     mtime: 1756000000000,
+    overrides: [],
     drift: [],
     snapshotAsOf: '2026-09-04',
     backups: [],

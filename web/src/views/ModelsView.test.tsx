@@ -103,6 +103,7 @@ function statusFixture(drift: DriftCell[]): StatusResponse {
     path: '/sandbox/opencode.json',
     hash: 'hash-base-0001',
     mtime: 1756000000000,
+    overrides: [],
     drift,
     snapshotAsOf: catalogFixture.asOf,
     backups: [],

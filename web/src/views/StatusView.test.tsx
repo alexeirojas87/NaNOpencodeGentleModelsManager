@@ -30,7 +30,11 @@ import {
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { DriftCell, StatusResponse } from '../../../shared/types';
+import type {
+  ConfigOverride,
+  DriftCell,
+  StatusResponse,
+} from '../../../shared/types';
 import StatusView from './StatusView';
 
 function fixture(overrides?: Partial<StatusResponse>): StatusResponse {
@@ -38,6 +42,9 @@ function fixture(overrides?: Partial<StatusResponse>): StatusResponse {
     path: '/sandbox/opencode.json',
     hash: 'hash-status-0001',
     mtime: 1756000000000,
+    // No higher-precedence layer in the default fixture; override tests
+    // inject entries explicitly.
+    overrides: [],
     drift: [],
     snapshotAsOf: '2026-09-04',
     backups: [],
@@ -292,6 +299,40 @@ describe('Status — restartRequired carrier (CX-3)', () => {
     expect(
       screen.getByRole('status', { name: /no restart pending/i }),
     ).toBeTruthy();
+  });
+});
+
+describe('Status — higher-precedence override warning', () => {
+  const OVERRIDE: ConfigOverride = {
+    kind: 'config_dir_env',
+    path: '/other/opencode/opencode.jsonc',
+    reason:
+      'OPENCODE_CONFIG_DIR is loaded after the global config and overrides the managed CONFIG.',
+  };
+
+  it('renders the warning panel with each winning layer path when overrides are reported', async () => {
+    scriptApi({
+      gets: [{ status: 200, body: fixture({ overrides: [OVERRIDE] }) }],
+    });
+    await rendered();
+
+    const panel = screen.getByRole('region', { name: 'Config overrides' });
+    // Each winning layer is named by its path in a mono element…
+    within(panel).getByText(OVERRIDE.path);
+    // …and the panel states plainly that the layer is loaded AFTER CONFIG.
+    within(panel).getByText(/loaded after the global config/);
+    within(panel).getByText(/AFTER the global config/);
+    // Concrete fix: drop the duplicate agent block or unset the env var.
+    within(panel).getByText(/remove the duplicated/);
+    within(panel).getByText('gentle-ai');
+  });
+
+  it('renders nothing extra when overrides is empty', async () => {
+    scriptApi();
+    await rendered();
+    expect(
+      screen.queryByRole('region', { name: 'Config overrides' }),
+    ).toBeNull();
   });
 });
 
