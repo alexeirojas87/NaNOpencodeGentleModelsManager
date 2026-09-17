@@ -10,6 +10,10 @@ coverage/
 # machine-local skill registry (not part of the project)
 .atl/
 
+# machine-local tool state (Serena memories, TokenSave graph DB)
+.serena/
+.tokensave/
+
 # misc
 *.log
 .DS_Store
