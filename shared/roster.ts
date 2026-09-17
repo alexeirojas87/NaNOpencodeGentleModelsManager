@@ -57,18 +57,19 @@ const SDD_PHASES = [
   'sdd-archive',
 ] as const;
 
-const SDD_DESCRIPTIONS: Readonly<Record<(typeof SDD_PHASES)[number], string>> = {
-  'sdd-init': 'Initialize SDD context, testing capabilities, and registry.',
-  'sdd-explore': 'Explore SDD ideas before committing to a change.',
-  'sdd-research': 'Investigate optional questions using authorized sources.',
-  'sdd-propose': 'Create an SDD change proposal with intent and scope.',
-  'sdd-spec': 'Write SDD delta specs with requirements and scenarios.',
-  'sdd-design': 'Create the SDD technical design and architecture approach.',
-  'sdd-tasks': 'Break an SDD change into implementation tasks.',
-  'sdd-apply': 'Implement SDD tasks from specs and design.',
-  'sdd-verify': 'Run optional practical diagnostics against implementation.',
-  'sdd-archive': 'Archive an SDD change by syncing delta specs.',
-};
+const SDD_DESCRIPTIONS: Readonly<Record<(typeof SDD_PHASES)[number], string>> =
+  {
+    'sdd-init': 'Initialize SDD context, testing capabilities, and registry.',
+    'sdd-explore': 'Explore SDD ideas before committing to a change.',
+    'sdd-research': 'Investigate optional questions using authorized sources.',
+    'sdd-propose': 'Create an SDD change proposal with intent and scope.',
+    'sdd-spec': 'Write SDD delta specs with requirements and scenarios.',
+    'sdd-design': 'Create the SDD technical design and architecture approach.',
+    'sdd-tasks': 'Break an SDD change into implementation tasks.',
+    'sdd-apply': 'Implement SDD tasks from specs and design.',
+    'sdd-verify': 'Run optional practical diagnostics against implementation.',
+    'sdd-archive': 'Archive an SDD change by syncing delta specs.',
+  };
 
 const skillBindingEntries = (): PhaseAgentEntry[] =>
   SDD_PHASES.map((phase) => ({

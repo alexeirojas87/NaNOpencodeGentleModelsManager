@@ -42,6 +42,14 @@ function fixture(overrides?: Partial<StatusResponse>): StatusResponse {
     snapshotAsOf: '2026-09-04',
     backups: [],
     restartRequired: false,
+    // phase-agents-v3 (D3): the gentleAi block joined StatusResponse; this
+    // view's contract is unchanged — it consumes GET /api/status only.
+    gentleAi: {
+      version: '2.5.0',
+      mode: '2.x',
+      rosterOwned: false,
+      source: 'state_file',
+    },
     ...overrides,
   };
 }

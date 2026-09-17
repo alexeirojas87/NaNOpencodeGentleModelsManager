@@ -107,6 +107,14 @@ function statusFixture(drift: DriftCell[]): StatusResponse {
     snapshotAsOf: catalogFixture.asOf,
     backups: [],
     restartRequired: false,
+    // phase-agents-v3 (D3): required StatusResponse field; this view's
+    // contract is unchanged.
+    gentleAi: {
+      version: '2.5.0',
+      mode: '2.x',
+      rosterOwned: false,
+      source: 'state_file',
+    },
   };
 }
 

@@ -27,6 +27,7 @@ import { app } from '../../server/src/app';
 import { nanSnapshot } from '../../server/src/catalog';
 import { BACKUP_DIR_NAME } from '../../server/src/config/backup';
 import type { ConfigTree } from '../../server/src/config/load';
+import { PatchError, patch } from '../../server/src/config/patch';
 import type { ConfigResponse } from '../../shared/types';
 
 const FIXTURE_PATH = fileURLToPath(
@@ -301,6 +302,12 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
     const res = await get('/api/status');
     expect(res.status).toBe(200);
     const body = await res.json();
+    // phase-agents-v3 (:231 scoped golden): the gentleAi block joins the
+    // golden under the DEFAULT 2.5.0 fixture — version from the state file,
+    // mode 2.x, rosterOwned false (the fixture carries only sdd-spec and
+    // jd-judge-a of the 13 exact roster names), source state_file, no
+    // detail (detail exists ONLY on conservative_fallback). The ConfigResponse
+    // 7-key pin stays untouched — the extension is StatusResponse-only (D9).
     expect(body).toEqual({
       path: configPath,
       hash: hashOf(configPath),
@@ -355,6 +362,54 @@ describe('GET /api/status — minimal fields per design §API-Surface', () => {
       backups: [],
       // No CONFIG write has happened in this process yet (CX-3 carrier).
       restartRequired: false,
+      gentleAi: {
+        version: '2.5.0',
+        mode: '2.x',
+        rosterOwned: false,
+        source: 'state_file',
+      },
+    });
+  });
+
+  it('gentleAi reflects a 3.x override — version, mode and source from the state fixture', async () => {
+    sandboxConfig();
+    stateFixture('3.0.0');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: '3.0.0',
+      mode: '3.x',
+      rosterOwned: false,
+      source: 'state_file',
+    });
+  });
+
+  it('gentleAi degrades conservatively (unknown) via absent state + garbage bin stub — detail names the code', async () => {
+    sandboxConfig();
+    absentStateFixture();
+    stubBinary('totally-unparseable');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: null,
+      mode: 'unknown',
+      rosterOwned: false,
+      source: 'conservative_fallback',
+      // detail is present ONLY on conservative_fallback (D3 contract) and
+      // names the typed failure — the diagnostic channel for "why is
+      // Install disabled?".
+      detail: expect.stringContaining('unparseable'),
+    });
+  });
+
+  it('gentleAi falls through corrupt state to a successful binary probe', async () => {
+    sandboxConfig();
+    corruptStateFixture();
+    stubBinary('3.2.0');
+    const body = await (await get('/api/status')).json();
+    expect(body['gentleAi']).toEqual({
+      version: '3.2.0',
+      mode: '3.x',
+      rosterOwned: false,
+      source: 'binary_probe',
     });
   });
 
@@ -1032,6 +1087,176 @@ describe('POST /api/agents — exists-gate and hash chain (AC-1, AC-7, SCW-2)', 
     const res = await post('/api/agents', validBody(staleHash, 'dup-agent', P));
     expect(res.status).toBe(409);
     expect((await envelope(res)).error?.code).toBe('stale');
+  });
+});
+
+// --- phase-agents-v3: mode field + version-conditional reserved table -------
+// Task 2.2 (map row 9; spec scenarios "Create with valid mode", "Invalid mode
+// rejected"). The version fixtures come from task 1.1: stateFixture('3.0.0')
+// for 3.x, the beforeAll 2.5.0 default for 2.x, absentStateFixture() +
+// stubBinary(garbage) for unknown — a real gentle-ai binary is NEVER spawned.
+
+describe('POST /api/agents — mode field whitelist (phase-agents-v3, map row 9)', () => {
+  it('creates with mode "subagent" → 200, mode persisted in canonical order, fresh hash echoed', async () => {
+    const configPath = sandboxConfig();
+    const before = readFileSync(configPath, 'utf8');
+    const res = await post('/api/agents', {
+      hash: sha256(before),
+      name: 'phased-helper',
+      agent: {
+        model: 'nan/qwen3.6',
+        description: 'Phase agent',
+        mode: 'subagent',
+        prompt: 'Do the assigned thing well.',
+      },
+    });
+    expect(res.status).toBe(200);
+    const w = await envelope(res);
+    expect(w.ok).toBe(true);
+    // AC-7: the echoed hash IS the fresh post-write hash.
+    expect(w.hash).toBe(hashOf(configPath));
+    const entry = treeOf(configPath).agent?.['phased-helper'] as Record<
+      string,
+      unknown
+    >;
+    expect(entry).toEqual({
+      model: 'nan/qwen3.6',
+      description: 'Phase agent',
+      mode: 'subagent',
+      prompt: 'Do the assigned thing well.',
+    });
+    // Canonical build order (design D7): model, description, mode, prompt.
+    expect(Object.keys(entry)).toEqual([
+      'model',
+      'description',
+      'mode',
+      'prompt',
+    ]);
+  });
+
+  it('mode "boss" → 400 mode_invalid naming the field; zero mutation, zero backups', async () => {
+    const configPath = sandboxConfig();
+    const dir = dirname(configPath);
+    const before = readFileSync(configPath, 'utf8');
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'mode-boss', { ...P, mode: 'boss' }),
+    );
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error?.code).toBe('mode_invalid');
+    expect(body.error?.field).toBe('mode');
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+    expect(backupFiles(dir)).toEqual([]);
+  });
+
+  it('non-string mode (42) → 400 mode_invalid', async () => {
+    sandboxConfig();
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(process.env.CONFIG_PATH as string), 'mode-num', {
+        ...P,
+        mode: 42,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('mode_invalid');
+  });
+
+  it('gate order stays deterministic: reserved name + invalid mode + missing prompt → reserved_name FIRST', async () => {
+    const configPath = sandboxConfig();
+    const res = await post('/api/agents', {
+      hash: hashOf(configPath),
+      name: 'sdd-mine',
+      agent: { mode: 'boss' },
+    });
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
+  });
+
+  it('leaf agent.<name>.mode patch write stays off_allowlist (patch AGENT_FIELDS untouched)', () => {
+    const configPath = sandboxConfig();
+    const err = (() => {
+      try {
+        patch(treeOf(configPath), [
+          { path: ['agent', 'my-helper', 'mode'], value: 'subagent' },
+        ]);
+        return undefined;
+      } catch (e) {
+        return e as PatchError;
+      }
+    })();
+    expect(err).toBeInstanceOf(PatchError);
+    expect(err?.code).toBe('off_allowlist');
+  });
+});
+
+describe('POST /api/agents — reserved table is version-conditional (:803 both modes)', () => {
+  it('3.x fixture: exact roster name "sdd-apply" creates successfully', async () => {
+    sandboxConfig();
+    stateFixture('3.0.0');
+    const configPath = process.env.CONFIG_PATH as string;
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'sdd-apply', {
+        mode: 'subagent',
+        prompt: 'Load the sdd-apply skill via skill().',
+      }),
+    );
+    expect(res.status).toBe(200);
+    const entry = treeOf(configPath).agent?.['sdd-apply'] as Record<
+      string,
+      unknown
+    >;
+    expect(entry['mode']).toBe('subagent');
+  });
+
+  it('3.x fixture: legacy variant "sdd-init-deep" stays reserved_name', async () => {
+    sandboxConfig();
+    stateFixture('3.0.0');
+    const configPath = process.env.CONFIG_PATH as string;
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'sdd-init-deep', P),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
+  });
+
+  it('2.5.0 default fixture: exact roster name "sdd-apply" → reserved_name (2.x unchanged)', async () => {
+    sandboxConfig();
+    const configPath = process.env.CONFIG_PATH as string;
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'sdd-apply', P),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
+  });
+
+  it('unknown fixture (absent state + garbage bin stub): "sdd-apply" → reserved_name', async () => {
+    sandboxConfig();
+    absentStateFixture();
+    stubBinary('totally-unparseable');
+    const configPath = process.env.CONFIG_PATH as string;
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'sdd-apply', P),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
+  });
+
+  it('unknown fixture (CORRUPT state + garbage bin stub): "sdd-apply" → reserved_name', async () => {
+    sandboxConfig();
+    corruptStateFixture();
+    stubBinary('totally-unparseable');
+    const configPath = process.env.CONFIG_PATH as string;
+    const res = await post(
+      '/api/agents',
+      validBody(hashOf(configPath), 'sdd-apply', P),
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).error?.code).toBe('reserved_name');
   });
 });
 
